@@ -6,13 +6,15 @@
   "scripts": {
     "start": "node server.js",
     "dev": "node --watch server.js",
-    "seed": "node db/seed.js",
+    "seed": "node prisma/seed.js",
     "prisma:generate": "prisma generate",
-    "prisma:migrate": "prisma migrate dev",
+    "prisma:push": "prisma db push",
+    "prisma:migrate": "prisma migrate deploy",
     "postinstall": "prisma generate"
   },
   "dependencies": {
-    "@prisma/client": "^5.22.0",
+    "@prisma/client": "^7.4.2",
+    "@supabase/supabase-js": "^2.45.4",
     "bcryptjs": "^2.4.3",
     "cors": "^2.8.5",
     "dotenv": "^17.3.1",
@@ -21,10 +23,9 @@
     "json2csv": "^5.0.7",
     "jsonwebtoken": "^9.0.2",
     "morgan": "^1.10.0",
-    "pg": "^8.18.0",
-    "@supabase/supabase-js": "^2.45.4"
+    "pg": "^8.18.0"
   },
   "devDependencies": {
-    "prisma": "^5.22.0"
+    "prisma": "^7.4.2"
   }
 }
