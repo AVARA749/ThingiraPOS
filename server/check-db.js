@@ -1,16 +1,21 @@
-const { getAll, closeDatabase } = require('./db/database');
+const prisma = require("./db/prisma");
 
 async function checkUsers() {
-    try {
-        const users = await getAll('SELECT username, shop_id FROM users');
-        console.log('Current users:', users);
-        const shops = await getAll('SELECT id, name FROM shops');
-        console.log('Current shops:', shops);
-    } catch (err) {
-        console.error('Error:', err);
-    } finally {
-        closeDatabase();
-    }
+  try {
+    const users = await prisma.user.findMany({
+      select: { username: true, shopId: true },
+    });
+    console.log("Current users:", users);
+
+    const shops = await prisma.shop.findMany({
+      select: { id: true, name: true },
+    });
+    console.log("Current shops:", shops);
+  } catch (err) {
+    console.error("Error:", err);
+  } finally {
+    await prisma.$disconnect();
+  }
 }
 
 checkUsers();

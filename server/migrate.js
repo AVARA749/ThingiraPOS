@@ -1,15 +1,15 @@
-const { initDatabase, closeDatabase } = require('./db/database');
+const prisma = require("./db/prisma");
 
 async function runMigration() {
-    try {
-        console.log('Running database migration...');
-        await initDatabase();
-        console.log('Migration complete!');
-    } catch (err) {
-        console.error('Migration failed:', err);
-    } finally {
-        closeDatabase();
-    }
+  try {
+    console.log("Checking database connection via Prisma...");
+    await prisma.$connect();
+    console.log("✅ Connection successful!");
+  } catch (err) {
+    console.error("❌ Connection failed:", err);
+  } finally {
+    await prisma.$disconnect();
+  }
 }
 
 runMigration();
