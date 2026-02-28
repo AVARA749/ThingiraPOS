@@ -28,24 +28,34 @@ app.use(
   }),
 );
 // CORS: allow the deployed client origin and localhost for dev
-const allowedOrigins =
-  process.env.CLIENT_ORIGIN ?
-    process.env.CLIENT_ORIGIN.split(",").map((o) => o.trim())
-  : ["http://localhost:3000", "http://127.0.0.1:3000"];
+const allowedOrigins = (process.env.CLIENT_ORIGIN || "")
+  .split(",")
+  .map((o) => o.trim().replace(/\/$/, ""))
+  .filter(Boolean);
+
+if (allowedOrigins.length === 0) {
+  allowedOrigins.push("http://localhost:3000", "http://127.0.0.1:3000");
+}
 
 app.use(
   cors({
     origin: (origin, callback) => {
-      // Allow requests with no origin (e.g. mobile apps, Postman, curl)
+      // Allow requests with no origin (e.g. mobile apps, Postman)
       if (!origin) return callback(null, true);
-      if (allowedOrigins.includes("*") || allowedOrigins.includes(origin)) {
+
+      const normalizedOrigin = origin.replace(/\/$/, "");
+      if (
+        allowedOrigins.includes("*") ||
+        allowedOrigins.includes(normalizedOrigin)
+      ) {
         return callback(null, true);
       }
+      console.warn(`[CORS] Rejected: ${origin}. Allowed:`, allowedOrigins);
       return callback(new Error(`CORS: origin ${origin} not allowed`));
     },
     methods: ["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"],
     allowedHeaders: ["Content-Type", "Authorization"],
-    credentials: false,
+    credentials: true,
   }),
 );
 app.use(morgan("dev"));
@@ -55,10 +65,11 @@ app.use(express.urlencoded({ extended: true }));
 // Custom Request Logger
 app.use((req, res, next) => {
   const start = Date.now();
+  const origin = req.get("origin") || "no-origin";
   res.on("finish", () => {
     const duration = Date.now() - start;
     console.log(
-      `[${new Date().toLocaleTimeString()}] ${req.method} ${req.originalUrl} - ${res.statusCode} (${duration}ms)`,
+      `[${new Date().toLocaleTimeString()}] ${req.method} ${req.originalUrl} - ${res.statusCode} (Origin: ${origin}, ${duration}ms)`,
     );
   });
   next();
