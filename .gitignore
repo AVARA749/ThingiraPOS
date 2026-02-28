@@ -1,0 +1,24 @@
+node_modules/
+.env
+*.env.local
+*.env.*.local
+
+# Server
+server/node_modules/
+server/.env
+
+# Client build artifacts (not needed in server repo)
+client/node_modules/
+client/dist/
+client/.env
+
+# Prisma
+server/prisma/*.db
+
+# Logs
+*.log
+npm-debug.log*
+
+# OS
+.DS_Store
+Thumbs.db
