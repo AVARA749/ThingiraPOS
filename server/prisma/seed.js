@@ -12,10 +12,10 @@
  */
 
 require("dotenv").config({
-  path: require("path").resolve(__dirname, "../../server/.env"),
+  path: require("path").resolve(__dirname, "../.env"),
 });
 
-const prisma = require("./prisma");
+const prisma = require("./client");
 const supabase = require("../utils/supabase");
 
 const ADMIN_USERNAME = "admin";
