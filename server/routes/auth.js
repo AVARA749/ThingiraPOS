@@ -9,63 +9,63 @@ router.get("/test", (req, res) =>
   res.json({ message: "Auth routes are reachable" }),
 );
 
-// POST /api/auth/register
 router.post("/register", async (req, res) => {
   try {
-    const { username, password, full_name, shop_name, phone } = req.body;
+    const { username, email, password, fullName, shopName, phone } = req.body;
 
-    if (!username || !password || !full_name) {
-      return res
-        .status(400)
-        .json({ error: "Username, password, and full name are required." });
+    if (!username || !email || !password || !fullName) {
+      return res.status(400).json({
+        error: "Username, email, password, and full name are required.",
+      });
     }
 
     // 1. Register in Supabase Auth
     const { data: authData, error: authError } = await supabase.auth.signUp({
-      email: `${username}@thingira.local`,
+      email,
       password,
       options: {
-        data: { full_name, username },
+        data: { username, full_name: fullName },
       },
     });
 
     if (authError) {
+      console.error("[Register] Supabase Auth error:", authError.message);
       return res.status(400).json({ error: authError.message });
     }
 
-    // 2. Handle Shop logic
-    let finalShopName = shop_name || "ThingiraShop";
-    let shop = await prisma.shop.findFirst({
-      where: { name: { equals: finalShopName, mode: "insensitive" } },
-    });
-    if (!shop) {
-      shop = await prisma.shop.create({ data: { name: finalShopName } });
-    }
+    // 2. Create local user and shop in a transaction
+    const { user } = await prisma.$transaction(async (tx) => {
+      // Create shop
+      const shop = await tx.shop.create({
+        data: {
+          name: shopName || `${username}'s Shop`,
+          phone: phone || "",
+        },
+      });
 
-    // 3. Create local user profile
-    const shopUserCount = await prisma.user.count({
-      where: { shopId: shop.id },
-    });
-    const role = shopUserCount === 0 ? "admin" : "staff";
+      // Create user
+      const newUser = await tx.user.create({
+        data: {
+          username,
+          email,
+          passwordHash: "SUPABASE_AUTH",
+          fullName,
+          phone: phone || "",
+          shopName: shop.name,
+          role: "admin",
+          shopId: shop.id,
+        },
+      });
 
-    const user = await prisma.user.create({
-      data: {
-        username,
-        passwordHash: "SUPABASE_AUTH",
-        fullName: full_name,
-        shopId: shop.id,
-        shopName: finalShopName,
-        phone: phone || "",
-        role,
-      },
+      return { user: newUser, shop };
     });
 
-    // Return Supabase session token directly — no custom JWT needed
     res.status(201).json({
       token: authData.session?.access_token,
       user: {
         id: user.id,
         username: user.username,
+        email: user.email,
         full_name: user.fullName,
         shop_name: user.shopName,
         shop_id: user.shopId,
@@ -88,24 +88,29 @@ router.post("/login", async (req, res) => {
         .json({ error: "Username and password are required." });
     }
 
-    // 1. Sign in with Supabase — returns session with access_token
-    const { data: authData, error: authError } =
-      await supabase.auth.signInWithPassword({
-        email: `${username}@thingira.local`,
-        password,
-      });
-
-    if (authError || !authData.session) {
-      return res.status(401).json({ error: "Invalid username or password." });
-    }
-
-    // 2. Get local user profile for shop/role context
+    // 1. Find the user locally to get their email
     const user = await prisma.user.findFirst({
       where: { username: { equals: username, mode: "insensitive" } },
     });
 
     if (!user) {
-      return res.status(401).json({ error: "User profile not found." });
+      console.warn(`[Login] User not found: ${username}`);
+      return res.status(401).json({ error: "Invalid username or password." });
+    }
+
+    // 2. Sign in with Supabase using the stored email
+    const { data: authData, error: authError } =
+      await supabase.auth.signInWithPassword({
+        email: user.email,
+        password,
+      });
+
+    if (authError || !authData.session) {
+      console.warn(
+        `[Login] Supabase Auth failed for ${username} (${user.email}):`,
+        authError?.message,
+      );
+      return res.status(401).json({ error: "Invalid username or password." });
     }
 
     res.json({

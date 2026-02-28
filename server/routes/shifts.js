@@ -26,7 +26,7 @@ router.get("/status", async (req, res) => {
 // POST /api/shifts/open - Start a new shift
 router.post("/open", async (req, res) => {
   try {
-    const { start_cash, notes } = req.body;
+    const { opening_balance, notes } = req.body;
     const shopId = req.user.shop_id;
     const userId = req.user.id;
 
@@ -42,7 +42,7 @@ router.post("/open", async (req, res) => {
       data: {
         shopId,
         userId,
-        startCash: parseFloat(start_cash || 0),
+        startCash: parseFloat(opening_balance || 0),
         notes: notes || "",
         status: "open",
       },
@@ -58,7 +58,7 @@ router.post("/open", async (req, res) => {
 // POST /api/shifts/close - Close shift and calculate variance
 router.post("/close", async (req, res) => {
   try {
-    const { actual_cash, notes } = req.body;
+    const { closing_balance, notes } = req.body;
     const shopId = req.user.shop_id;
     const userId = req.user.id;
 
@@ -85,14 +85,14 @@ router.post("/close", async (req, res) => {
 
       const cashSales = parseFloat(cashSalesAggregation._sum.totalAmount || 0);
       const expectedCash = parseFloat(shift.startCash) + cashSales;
-      const variance = parseFloat(actual_cash) - expectedCash;
+      const variance = parseFloat(closing_balance) - expectedCash;
 
       return await tx.shiftRegister.update({
         where: { id: shift.id },
         data: {
           endTime: new Date(),
           expectedCash: expectedCash,
-          actualCash: parseFloat(actual_cash),
+          actualCash: parseFloat(closing_balance),
           variance: variance,
           status: "closed",
           notes: notes || undefined,

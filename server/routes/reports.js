@@ -124,6 +124,21 @@ router.get("/inventory", async (req, res) => {
       sold: movements[id],
     }));
 
+    // Slow moving: Items with least sales in last 30 days, including those with 0 sales
+    const slowMovingThreshold = 30; // 30 days
+    const allItems = await prisma.item.findMany({
+      where: { shopId },
+      select: { id: true, name: true },
+    });
+
+    const slowMoving = allItems
+      .map((item) => ({
+        name: item.name,
+        sold: movements[item.id] || 0,
+      }))
+      .sort((a, b) => a.sold - b.sold)
+      .slice(0, 10);
+
     const lowStock = items
       .filter((i) => i.quantity <= i.minStockLevel)
       .map((i) => ({
@@ -135,7 +150,7 @@ router.get("/inventory", async (req, res) => {
     res.json({
       valuation,
       fast_moving: fastMoving,
-      slow_moving: [], // Simplified for now
+      slow_moving: slowMoving,
       low_stock: lowStock,
     });
   } catch (err) {
