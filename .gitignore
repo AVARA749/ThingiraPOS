@@ -7,10 +7,8 @@ node_modules/
 server/node_modules/
 server/.env
 
-# Client build artifacts (not needed in server repo)
-client/node_modules/
-client/dist/
-client/.env
+# Client — lives in its own repo (AVARA749/thingira-web)
+client/
 
 # Prisma
 server/prisma/*.db
