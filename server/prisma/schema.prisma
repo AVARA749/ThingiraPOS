@@ -1,0 +1,251 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
+}
+
+model Shop {
+  id        Int      @id @default(autoincrement())
+  name      String
+  address   String?
+  phone     String?
+  email     String?
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @default(now()) @updatedAt @map("updated_at")
+
+  users           User[]
+  suppliers       Supplier[]
+  items           Item[]
+  purchases       Purchase[]
+  customers       Customer[]
+  sales           Sale[]
+  saleItems       SaleItem[]
+  stockMovements  StockMovement[]
+  creditLedgers   CreditLedger[]
+  creditPayments  CreditPayment[]
+  generalLedgers  GeneralLedger[]
+  shiftRegisters  ShiftRegister[]
+
+  @@map("shops")
+}
+
+model User {
+  id           Int      @id @default(autoincrement())
+  username     String   @unique
+  passwordHash String   @map("password_hash")
+  fullName     String   @map("full_name")
+  shopName     String?  @map("shop_name")
+  phone        String?
+  role         String   @default("admin")
+  createdAt    DateTime @default(now()) @map("created_at")
+  updatedAt    DateTime @default(now()) @updatedAt @map("updated_at")
+  shopId       Int?     @map("shop_id")
+  shop         Shop?    @relation(fields: [shopId], references: [id], onDelete: Cascade)
+
+  shiftRegisters ShiftRegister[]
+
+  @@map("users")
+}
+
+model Supplier {
+  id        Int      @id @default(autoincrement())
+  name      String
+  address   String?
+  phone     String?
+  email     String?
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @default(now()) @updatedAt @map("updated_at")
+  shopId    Int?     @map("shop_id")
+  shop      Shop?    @relation(fields: [shopId], references: [id], onDelete: Cascade)
+
+  items Item[]
+
+  @@map("suppliers")
+}
+
+model Item {
+  id             Int      @id @default(autoincrement())
+  name           String
+  buyingPrice    Decimal  @default(0) @map("buying_price") @db.Decimal(10, 2)
+  sellingPrice   Decimal  @default(0) @map("selling_price") @db.Decimal(10, 2)
+  quantity       Int      @default(0)
+  minStockLevel  Int      @default(5) @map("min_stock_level")
+  supplierId     Int?     @map("supplier_id")
+  category       String?  @default("General")
+  barcode        String?
+  createdAt      DateTime @default(now()) @map("created_at")
+  updatedAt      DateTime @default(now()) @updatedAt @map("updated_at")
+  shopId         Int?     @map("shop_id")
+  shop           Shop?    @relation(fields: [shopId], references: [id], onDelete: Cascade)
+
+  supplier Supplier? @relation(fields: [supplierId], references: [id])
+
+  @@map("items")
+}
+
+model Purchase {
+  id            Int      @id @default(autoincrement())
+  supplierId    Int      @map("supplier_id")
+  itemId        Int      @map("item_id")
+  quantity      Int
+  buyingPrice   Decimal  @map("buying_price") @db.Decimal(10, 2)
+  totalCost     Decimal  @map("total_cost") @db.Decimal(10, 2)
+  datePurchased DateTime @default(now()) @map("date_purchased") @db.Date
+  notes         String?
+  createdAt     DateTime @default(now()) @map("created_at")
+  shopId        Int?     @map("shop_id")
+  shop          Shop?    @relation(fields: [shopId], references: [id], onDelete: Cascade)
+
+  @@map("purchases")
+}
+
+model Customer {
+  id          Int      @id @default(autoincrement())
+  name        String
+  phone       String?
+  email       String?
+  address     String?
+  totalCredit Decimal? @default(0) @map("total_credit") @db.Decimal(10, 2)
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @default(now()) @updatedAt @map("updated_at")
+  shopId      Int?     @map("shop_id")
+  shop        Shop?    @relation(fields: [shopId], references: [id], onDelete: Cascade)
+
+  sales          Sale[]
+  creditLedgers  CreditLedger[]
+  creditPayments CreditPayment[]
+
+  @@map("customers")
+}
+
+model Sale {
+  id            Int      @id @default(autoincrement())
+  receiptNumber String?  @map("receipt_number")
+  customerId    Int?     @map("customer_id")
+  customerName  String?  @map("customer_name")
+  customerPhone String?  @map("customer_phone")
+  totalAmount   Decimal  @default(0) @map("total_amount") @db.Decimal(10, 2)
+  paymentType   String   @default("cash") @map("payment_type")
+  status        String?  @default("completed")
+  notes         String?
+  createdAt     DateTime @default(now()) @map("created_at")
+  shopId        Int?     @map("shop_id")
+  shop          Shop?    @relation(fields: [shopId], references: [id], onDelete: Cascade)
+
+  customer  Customer?  @relation(fields: [customerId], references: [id])
+  saleItems SaleItem[]
+
+  @@unique([shopId, receiptNumber])
+  @@map("sales")
+}
+
+model SaleItem {
+  id          Int      @id @default(autoincrement())
+  saleId      Int      @map("sale_id")
+  itemId      Int      @map("item_id")
+  itemName    String   @map("item_name")
+  quantity    Int
+  unitPrice   Decimal  @map("unit_price") @db.Decimal(10, 2)
+  buyingPrice Decimal  @default(0) @map("buying_price") @db.Decimal(10, 2)
+  subtotal    Decimal  @map("subtotal") @db.Decimal(10, 2)
+  createdAt   DateTime @default(now()) @map("created_at")
+  shopId      Int?     @map("shop_id")
+  shop        Shop?    @relation(fields: [shopId], references: [id], onDelete: Cascade)
+
+  sale Sale @relation(fields: [saleId], references: [id], onDelete: Cascade)
+
+  @@map("sale_items")
+}
+
+model StockMovement {
+  id            Int      @id @default(autoincrement())
+  itemId        Int      @map("item_id")
+  itemName      String   @map("item_name")
+  movementType  String   @map("movement_type")
+  quantity      Int
+  balanceAfter  Int      @default(0) @map("balance_after")
+  referenceType String?  @map("reference_type")
+  referenceId   Int?     @map("reference_id")
+  supplierName  String?  @map("supplier_name")
+  notes         String?
+  createdAt     DateTime @default(now()) @map("created_at")
+  shopId        Int?     @map("shop_id")
+  shop          Shop?    @relation(fields: [shopId], references: [id], onDelete: Cascade)
+
+  @@map("stock_movements")
+}
+
+model CreditLedger {
+  id           Int       @id @default(autoincrement())
+  customerId   Int       @map("customer_id")
+  customerName String    @map("customer_name")
+  saleId       Int       @map("sale_id")
+  amount       Decimal   @map("amount") @db.Decimal(10, 2)
+  paidAmount   Decimal?  @default(0) @map("paid_amount") @db.Decimal(10, 2)
+  balance      Decimal   @map("balance") @db.Decimal(10, 2)
+  status       String    @default("unpaid")
+  dueDate      DateTime? @map("due_date") @db.Date
+  notes        String?
+  createdAt    DateTime  @default(now()) @map("created_at")
+  updatedAt    DateTime  @default(now()) @updatedAt @map("updated_at")
+  shopId       Int?      @map("shop_id")
+  shop         Shop?     @relation(fields: [shopId], references: [id], onDelete: Cascade)
+
+  customer Customer @relation(fields: [customerId], references: [id])
+
+  @@map("credit_ledger")
+}
+
+model CreditPayment {
+  id           Int      @id @default(autoincrement())
+  customerId   Int      @map("customer_id")
+  ledgerId     Int?     @map("ledger_id")
+  amount       Decimal  @map("amount") @db.Decimal(10, 2)
+  paymentDate  DateTime @default(now()) @map("payment_date") @db.Date
+  notes        String?
+  shopId       Int?     @map("shop_id")
+  shop         Shop?    @relation(fields: [shopId], references: [id], onDelete: Cascade)
+
+  customer Customer @relation(fields: [customerId], references: [id])
+
+  @@map("credit_payments")
+}
+
+model GeneralLedger {
+  id            Int      @id @default(autoincrement())
+  shopId        Int?     @map("shop_id")
+  accountName   String   @map("account_name")
+  accountType   String   @map("account_type")
+  debit         Decimal? @default(0) @db.Decimal(12, 2)
+  credit        Decimal? @default(0) @db.Decimal(12, 2)
+  referenceType String?  @map("reference_type")
+  referenceId   Int?     @map("reference_id")
+  description   String?
+  createdAt     DateTime @default(now()) @map("created_at")
+  shop          Shop?    @relation(fields: [shopId], references: [id], onDelete: Cascade)
+
+  @@map("general_ledger")
+}
+
+model ShiftRegister {
+  id           Int       @id @default(autoincrement())
+  shopId       Int?      @map("shop_id")
+  userId       Int?      @map("user_id")
+  startTime    DateTime  @default(now()) @map("start_time")
+  endTime      DateTime? @map("end_time")
+  startCash    Decimal   @default(0) @map("start_cash") @db.Decimal(10, 2)
+  expectedCash Decimal?  @map("expected_cash") @db.Decimal(10, 2)
+  actualCash   Decimal?  @map("actual_cash") @db.Decimal(10, 2)
+  variance     Decimal?  @db.Decimal(10, 2)
+  status       String?   @default("open")
+  notes        String?
+  createdAt    DateTime  @default(now()) @map("created_at")
+  shop         Shop?     @relation(fields: [shopId], references: [id], onDelete: Cascade)
+  user         User?     @relation(fields: [userId], references: [id])
+
+  @@map("shift_registers")
+}

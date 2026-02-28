@@ -1,218 +1,302 @@
-const express = require('express');
-const { getOne, getAll, query } = require('../db/database');
-const { authenticateToken } = require('../middleware/auth');
+const express = require("express");
+const prisma = require("../db/prisma");
+const { authenticateToken } = require("../middleware/auth");
 
 const router = express.Router();
 router.use(authenticateToken);
 
 // GET /api/items - List all items (with optional search)
-router.get('/', async (req, res) => {
-    try {
-        const { q, category, low_stock } = req.query;
-        const shopId = req.user.shop_id;
+router.get("/", async (req, res) => {
+  try {
+    const { q, category, low_stock } = req.query;
+    const shopId = req.user.shop_id;
 
-        let sql = `
-      SELECT i.*, s.name as supplier_name
-      FROM items i
-      LEFT JOIN suppliers s ON i.supplier_id = s.id
-      WHERE i.shop_id = $1
-    `;
-        const conditions = [];
-        const params = [shopId];
+    const where = {
+      shopId: shopId,
+    };
 
-        if (q) {
-            params.push(`%${q}%`);
-            const pIndex = params.length;
-            conditions.push(`(i.name ILIKE $${pIndex} OR i.category ILIKE $${pIndex} OR i.barcode ILIKE $${pIndex})`);
-        }
-        if (category) {
-            params.push(category);
-            conditions.push(`i.category = $${params.length}`);
-        }
-        if (low_stock === 'true') {
-            conditions.push(`i.quantity <= i.min_stock_level`);
-        }
-
-        if (conditions.length > 0) {
-            sql += ' AND ' + conditions.join(' AND ');
-        }
-        sql += ' ORDER BY i.name ASC';
-
-        const items = await getAll(sql, params);
-        res.json(items.map(i => ({
-            ...i,
-            buying_price: parseFloat(i.buying_price),
-            selling_price: parseFloat(i.selling_price),
-            quantity: parseInt(i.quantity)
-        })));
-    } catch (err) {
-        console.error('Items list error:', err);
-        res.status(500).json({ error: 'Failed to fetch items.' });
+    if (q) {
+      where.OR = [
+        { name: { contains: q, mode: "insensitive" } },
+        { category: { contains: q, mode: "insensitive" } },
+        { barcode: { contains: q, mode: "insensitive" } },
+      ];
     }
+
+    if (category) {
+      where.category = category;
+    }
+
+    if (low_stock === "true") {
+      where.quantity = {
+        lte: prisma.item.min_stock_level,
+      };
+      // Note: In Prisma, you can't easily compare two columns (quantity <= min_stock_level) directly in a simple 'where' without using a raw query or a custom query.
+      // But usually min_stock_level is a value. If we want column vs column, we might need some trick or just use the field names if they are static.
+      // Actually, Prisma 4.3.0+ supports extendedWhereUnique but not column-to-column comparisons in findMany easily.
+      // We'll use a pragmatic approach: if low_stock is true, filter them after or use raw.
+    }
+
+    let items = await prisma.item.findMany({
+      where,
+      include: {
+        supplier: {
+          select: { name: true },
+        },
+      },
+      orderBy: { name: "asc" },
+    });
+
+    if (low_stock === "true") {
+      items = items.filter((i) => i.quantity <= i.minStockLevel);
+    }
+
+    res.json(
+      items.map((i) => ({
+        ...i,
+        supplier_name: i.supplier?.name || null,
+        buying_price: parseFloat(i.buyingPrice),
+        selling_price: parseFloat(i.sellingPrice),
+      })),
+    );
+  } catch (err) {
+    console.error("Items list error:", err);
+    res.status(500).json({ error: "Failed to fetch items." });
+  }
 });
 
 // GET /api/items/categories
-router.get('/categories', async (req, res) => {
-    try {
-        const categories = await getAll(`SELECT DISTINCT category FROM items WHERE shop_id = $1 ORDER BY category`, [req.user.shop_id]);
-        res.json(categories.map(c => c.category));
-    } catch (err) {
-        res.status(500).json({ error: 'Failed to fetch categories.' });
-    }
+router.get("/categories", async (req, res) => {
+  try {
+    const categories = await prisma.item.findMany({
+      where: { shopId: req.user.shop_id },
+      select: { category: true },
+      distinct: ["category"],
+      orderBy: { category: "asc" },
+    });
+    res.json(categories.map((c) => c.category).filter(Boolean));
+  } catch (err) {
+    res.status(500).json({ error: "Failed to fetch categories." });
+  }
 });
 
 // GET /api/items/:id
-router.get('/:id', async (req, res) => {
-    try {
-        const item = await getOne(`
-      SELECT i.*, s.name as supplier_name
-      FROM items i
-      LEFT JOIN suppliers s ON i.supplier_id = s.id
-      WHERE i.id = $1 AND i.shop_id = $2
-    `, [req.params.id, req.user.shop_id]);
+router.get("/:id", async (req, res) => {
+  try {
+    const item = await prisma.item.findFirst({
+      where: {
+        id: parseInt(req.params.id),
+        shopId: req.user.shop_id,
+      },
+      include: {
+        supplier: {
+          select: { name: true },
+        },
+      },
+    });
 
-        if (!item) return res.status(404).json({ error: 'Item not found.' });
-        res.json({
-            ...item,
-            buying_price: parseFloat(item.buying_price),
-            selling_price: parseFloat(item.selling_price),
-            quantity: parseInt(item.quantity)
-        });
-    } catch (err) {
-        res.status(500).json({ error: 'Failed to fetch item.' });
-    }
+    if (!item) return res.status(404).json({ error: "Item not found." });
+    res.json({
+      ...item,
+      supplier_name: item.supplier?.name || null,
+      buying_price: parseFloat(item.buyingPrice),
+      selling_price: parseFloat(item.sellingPrice),
+    });
+  } catch (err) {
+    res.status(500).json({ error: "Failed to fetch item." });
+  }
 });
 
 // POST /api/items - Create a new item
-router.post('/', async (req, res) => {
-    try {
-        const { name, buying_price, selling_price, quantity, min_stock_level, supplier_id, category, barcode } = req.body;
-        const shopId = req.user.shop_id;
+router.post("/", async (req, res) => {
+  try {
+    const {
+      name,
+      buying_price,
+      selling_price,
+      quantity,
+      min_stock_level,
+      supplier_id,
+      category,
+      barcode,
+    } = req.body;
+    const shopId = req.user.shop_id;
 
-        if (!name || buying_price === undefined || selling_price === undefined) {
-            return res.status(400).json({ error: 'Name, buying price, and selling price are required.' });
-        }
-
-        // Check duplicate name in THIS shop
-        const existing = await getOne(`SELECT id FROM items WHERE LOWER(name) = LOWER($1) AND shop_id = $2`, [name, shopId]);
-        if (existing) {
-            return res.status(409).json({ error: 'An item with this name already exists in your shop.' });
-        }
-
-        const result = await query(`
-      INSERT INTO items (shop_id, name, buying_price, selling_price, quantity, min_stock_level, supplier_id, category, barcode)
-      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
-      RETURNING *
-    `, [shopId, name, buying_price, selling_price, quantity || 0, min_stock_level || 5, supplier_id || null, category || 'Others', barcode || null]);
-
-        const item = result.rows[0];
-
-        // Log stock movement if initial quantity > 0
-        if (quantity > 0) {
-            await query(`
-        INSERT INTO stock_movements (shop_id, item_id, item_name, movement_type, quantity, balance_after, reference_type, notes)
-        VALUES ($1, $2, $3, 'IN', $4, $5, 'purchase', 'Initial stock entry')
-      `, [shopId, item.id, name, quantity, quantity]);
-        }
-
-        res.status(201).json({
-            ...item,
-            buying_price: parseFloat(item.buying_price),
-            selling_price: parseFloat(item.selling_price),
-            quantity: parseInt(item.quantity)
-        });
-    } catch (err) {
-        console.error('Item create error:', err);
-        res.status(500).json({ error: 'Failed to create item.' });
+    if (!name || buying_price === undefined || selling_price === undefined) {
+      return res
+        .status(400)
+        .json({ error: "Name, buying price, and selling price are required." });
     }
+
+    const existing = await prisma.item.findFirst({
+      where: {
+        name: { equals: name, mode: "insensitive" },
+        shopId: shopId,
+      },
+    });
+    if (existing) {
+      return res
+        .status(409)
+        .json({ error: "An item with this name already exists in your shop." });
+    }
+
+    const item = await prisma.item.create({
+      data: {
+        shopId,
+        name,
+        buyingPrice: buying_price,
+        sellingPrice: selling_price,
+        quantity: quantity || 0,
+        minStockLevel: min_stock_level || 5,
+        supplierId: supplier_id || null,
+        category: category || "General",
+        barcode: barcode || null,
+      },
+    });
+
+    if (quantity > 0) {
+      await prisma.stockMovement.create({
+        data: {
+          shopId,
+          itemId: item.id,
+          itemName: name,
+          movementType: "IN",
+          quantity: quantity,
+          balanceAfter: quantity,
+          referenceType: "purchase",
+          notes: "Initial stock entry",
+        },
+      });
+    }
+
+    res.status(201).json({
+      ...item,
+      buying_price: parseFloat(item.buyingPrice),
+      selling_price: parseFloat(item.sellingPrice),
+    });
+  } catch (err) {
+    console.error("Item create error:", err);
+    res.status(500).json({ error: "Failed to create item." });
+  }
 });
 
 // PUT /api/items/:id - Update an item
-router.put('/:id', async (req, res) => {
-    try {
-        const { name, buying_price, selling_price, quantity, min_stock_level, supplier_id, category, barcode } = req.body;
-        const itemId = req.params.id;
-        const shopId = req.user.shop_id;
+router.put("/:id", async (req, res) => {
+  try {
+    const {
+      name,
+      buying_price,
+      selling_price,
+      quantity,
+      min_stock_level,
+      supplier_id,
+      category,
+      barcode,
+    } = req.body;
+    const itemId = parseInt(req.params.id);
+    const shopId = req.user.shop_id;
 
-        const existing = await getOne('SELECT * FROM items WHERE id = $1 AND shop_id = $2', [itemId, shopId]);
-        if (!existing) return res.status(404).json({ error: 'Item not found.' });
+    const existing = await prisma.item.findFirst({
+      where: { id: itemId, shopId: shopId },
+    });
+    if (!existing) return res.status(404).json({ error: "Item not found." });
 
-        // Check duplicate name (excluding current item)
-        if (name) {
-            const duplicate = await getOne(`SELECT id FROM items WHERE LOWER(name) = LOWER($1) AND id != $2 AND shop_id = $3`, [name, itemId, shopId]);
-            if (duplicate) {
-                return res.status(409).json({ error: 'An item with this name already exists.' });
-            }
-        }
-
-        const currentQty = parseInt(existing.quantity);
-        const newQty = quantity !== undefined ? parseInt(quantity) : currentQty;
-        const qtyDiff = newQty - currentQty;
-
-        await query(`
-      UPDATE items SET
-        name = COALESCE($1, name),
-        buying_price = COALESCE($2, buying_price),
-        selling_price = COALESCE($3, selling_price),
-        quantity = COALESCE($4, quantity),
-        min_stock_level = COALESCE($5, min_stock_level),
-        supplier_id = COALESCE($6, supplier_id),
-        category = COALESCE($7, category),
-        barcode = COALESCE($8, barcode),
-        updated_at = CURRENT_TIMESTAMP
-      WHERE id = $9 AND shop_id = $10
-    `, [name, buying_price, selling_price, quantity, min_stock_level, supplier_id, category, barcode, itemId, shopId]);
-
-        // Log stock adjustment if quantity changed
-        if (qtyDiff !== 0) {
-            await query(`
-        INSERT INTO stock_movements (shop_id, item_id, item_name, movement_type, quantity, balance_after, reference_type, notes)
-        VALUES ($1, $2, $3, $4, $5, $6, 'adjustment', 'Manual stock adjustment')
-      `, [
-                shopId,
-                itemId,
-                name || existing.name,
-                qtyDiff > 0 ? 'IN' : 'OUT',
-                Math.abs(qtyDiff),
-                newQty,
-            ]);
-        }
-
-        const updated = await getOne('SELECT * FROM items WHERE id = $1 AND shop_id = $2', [itemId, shopId]);
-        res.json({
-            ...updated,
-            buying_price: parseFloat(updated.buying_price),
-            selling_price: parseFloat(updated.selling_price),
-            quantity: parseInt(updated.quantity)
-        });
-    } catch (err) {
-        console.error('Item update error:', err);
-        res.status(500).json({ error: 'Failed to update item.' });
+    if (name) {
+      const duplicate = await prisma.item.findFirst({
+        where: {
+          name: { equals: name, mode: "insensitive" },
+          id: { not: itemId },
+          shopId: shopId,
+        },
+      });
+      if (duplicate) {
+        return res
+          .status(409)
+          .json({ error: "An item with this name already exists." });
+      }
     }
+
+    const currentQty = existing.quantity;
+    const newQty = quantity !== undefined ? parseInt(quantity) : currentQty;
+    const qtyDiff = newQty - currentQty;
+
+    const updated = await prisma.item.update({
+      where: { id: itemId },
+      data: {
+        name: name || undefined,
+        buyingPrice: buying_price !== undefined ? buying_price : undefined,
+        sellingPrice: selling_price !== undefined ? selling_price : undefined,
+        quantity: quantity !== undefined ? quantity : undefined,
+        minStockLevel:
+          min_stock_level !== undefined ? min_stock_level : undefined,
+        supplierId: supplier_id !== undefined ? supplier_id : undefined,
+        category: category || undefined,
+        barcode: barcode || undefined,
+      },
+    });
+
+    if (qtyDiff !== 0) {
+      await prisma.stockMovement.create({
+        data: {
+          shopId,
+          itemId: itemId,
+          itemName: name || existing.name,
+          movementType: qtyDiff > 0 ? "IN" : "OUT",
+          quantity: Math.abs(qtyDiff),
+          balanceAfter: newQty,
+          referenceType: "adjustment",
+          notes: "Manual stock adjustment",
+        },
+      });
+    }
+
+    res.json({
+      ...updated,
+      buying_price: parseFloat(updated.buyingPrice),
+      selling_price: parseFloat(updated.sellingPrice),
+    });
+  } catch (err) {
+    console.error("Item update error:", err);
+    res.status(500).json({ error: "Failed to update item." });
+  }
 });
 
 // DELETE /api/items/:id
-router.delete('/:id', async (req, res) => {
-    try {
-        const shopId = req.user.shop_id;
-        const item = await getOne('SELECT * FROM items WHERE id = $1 AND shop_id = $2', [req.params.id, shopId]);
-        if (!item) return res.status(404).json({ error: 'Item not found.' });
+router.delete("/:id", async (req, res) => {
+  try {
+    const itemId = parseInt(req.params.id);
+    const shopId = req.user.shop_id;
 
-        // Check if item has sales
-        const hasSales = await getOne('SELECT COUNT(*) as c FROM sale_items WHERE item_id = $1 AND shop_id = $2', [req.params.id, shopId]);
-        if (parseInt(hasSales.c) > 0) {
-            return res.status(400).json({ error: 'Cannot delete item with existing sales records. Consider zeroing the stock instead.' });
-        }
+    const item = await prisma.item.findFirst({
+      where: { id: itemId, shopId: shopId },
+    });
+    if (!item) return res.status(404).json({ error: "Item not found." });
 
-        await query('DELETE FROM stock_movements WHERE item_id = $1 AND shop_id = $2', [req.params.id, shopId]);
-        await query('DELETE FROM purchases WHERE item_id = $1 AND shop_id = $2', [req.params.id, shopId]);
-        await query('DELETE FROM items WHERE id = $1 AND shop_id = $2', [req.params.id, shopId]);
-
-        res.json({ message: 'Item deleted successfully.' });
-    } catch (err) {
-        console.error('Item delete error:', err);
-        res.status(500).json({ error: 'Failed to delete item.' });
+    const hasSales = await prisma.saleItem.count({
+      where: { itemId: itemId, shopId: shopId },
+    });
+    if (hasSales > 0) {
+      return res
+        .status(400)
+        .json({
+          error:
+            "Cannot delete item with existing sales records. Consider zeroing the stock instead.",
+        });
     }
+
+    await prisma.$transaction([
+      prisma.stockMovement.deleteMany({
+        where: { itemId: itemId, shopId: shopId },
+      }),
+      prisma.purchase.deleteMany({ where: { itemId: itemId, shopId: shopId } }),
+      prisma.item.delete({ where: { id: itemId } }),
+    ]);
+
+    res.json({ message: "Item deleted successfully." });
+  } catch (err) {
+    console.error("Item delete error:", err);
+    res.status(500).json({ error: "Failed to delete item." });
+  }
 });
 
 module.exports = router;

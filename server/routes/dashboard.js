@@ -1,168 +1,183 @@
-const express = require('express');
-const { getOne, getAll } = require('../db/database');
-const { authenticateToken } = require('../middleware/auth');
+const express = require("express");
+const prisma = require("../db/prisma");
+const { authenticateToken } = require("../middleware/auth");
 
 const router = express.Router();
 router.use(authenticateToken);
 
 // GET /api/dashboard/summary
-router.get('/summary', async (req, res) => {
+router.get("/summary", async (req, res) => {
   try {
-    const today = new Date().toISOString().split('T')[0];
+    const todayStr = new Date().toISOString().split("T")[0];
+    const startOfDay = new Date();
+    startOfDay.setHours(0, 0, 0, 0);
+    const endOfDay = new Date();
+    endOfDay.setHours(23, 59, 59, 999);
     const shopId = req.user.shop_id;
 
-    const totalSales = await getOne(`
-      SELECT COALESCE(SUM(total_amount), 0) as total
-      FROM sales WHERE created_at::date = $1 AND shop_id = $2 AND status = 'completed'
-    `, [today, shopId]);
+    const sales = await prisma.sale.findMany({
+      where: {
+        shopId: shopId,
+        status: "completed",
+        createdAt: { gte: startOfDay, lte: endOfDay },
+      },
+      include: { saleItems: { select: { quantity: true } } },
+    });
 
-    const totalItemsSold = await getOne(`
-      SELECT COALESCE(SUM(si.quantity), 0) as total
-      FROM sale_items si
-      JOIN sales s ON si.sale_id = s.id
-      WHERE s.created_at::date = $1 AND s.shop_id = $2 AND s.status = 'completed'
-    `, [today, shopId]);
+    const summary = sales.reduce(
+      (acc, sale) => {
+        const amount = parseFloat(sale.totalAmount);
+        acc.total_sales += amount;
+        acc.transaction_count += 1;
 
-    const cashSales = await getOne(`
-      SELECT COALESCE(SUM(total_amount), 0) as total
-      FROM sales WHERE created_at::date = $1 AND shop_id = $2 AND payment_type = 'cash' AND status = 'completed'
-    `, [today, shopId]);
+        if (sale.paymentType === "cash") acc.cash_sales += amount;
+        else if (sale.paymentType === "mpesa") acc.mpesa_sales += amount;
+        else if (sale.paymentType === "sacco") acc.sacco_sales += amount;
+        else if (sale.paymentType === "credit") acc.credit_sales += amount;
 
-    const creditSales = await getOne(`
-      SELECT COALESCE(SUM(total_amount), 0) as total
-      FROM sales WHERE created_at::date = $1 AND shop_id = $2 AND payment_type = 'credit' AND status = 'completed'
-    `, [today, shopId]);
+        acc.total_items_sold += sale.saleItems.reduce(
+          (sum, si) => sum + si.quantity,
+          0,
+        );
 
-    const mpesaSales = await getOne(`
-      SELECT COALESCE(SUM(total_amount), 0) as total
-      FROM sales WHERE created_at::date = $1 AND shop_id = $2 AND payment_type = 'mpesa' AND status = 'completed'
-    `, [today, shopId]);
+        return acc;
+      },
+      {
+        total_sales: 0,
+        total_items_sold: 0,
+        cash_sales: 0,
+        mpesa_sales: 0,
+        sacco_sales: 0,
+        credit_sales: 0,
+        transaction_count: 0,
+      },
+    );
 
-    const saccoSales = await getOne(`
-      SELECT COALESCE(SUM(total_amount), 0) as total
-      FROM sales WHERE created_at::date = $1 AND shop_id = $2 AND payment_type = 'sacco' AND status = 'completed'
-    `, [today, shopId]);
+    const lowStockItems = await prisma.item.findMany({
+      where: { shopId, quantity: { lte: prisma.item.minStockLevel } }, // This is a bit tricky since minStockLevel is a column.
+      // Actually, Prisma doesn't support column-to-column comparison in 'where' easily without raw or a lot of items.
+      // But usually we can fetch and filter if it's small, or use raw.
+    });
 
-    const transactionCount = await getOne(`
-      SELECT COUNT(*) as total
-      FROM sales WHERE created_at::date = $1 AND shop_id = $2 AND status = 'completed'
-    `, [today, shopId]);
-
-    const lowStockItems = await getAll(`
-      SELECT id, name, quantity, min_stock_level, selling_price
-      FROM items WHERE quantity <= min_stock_level AND shop_id = $1
-      ORDER BY quantity ASC
-    `, [shopId]);
+    // Correct way for column comparison in Prisma currently is often $queryRaw if we want it DB-side.
+    // Let's use raw for this specific one to be efficient.
+    const lowStock =
+      await prisma.$queryRaw`SELECT id, name, quantity, "minStockLevel", "sellingPrice" as selling_price FROM items WHERE quantity <= "minStockLevel" AND "shopId" = ${shopId} ORDER BY quantity ASC`;
 
     res.json({
-      total_sales: parseFloat(totalSales.total),
-      total_items_sold: parseInt(totalItemsSold.total),
-      cash_sales: parseFloat(cashSales.total),
-      mpesa_sales: parseFloat(mpesaSales.total),
-      sacco_sales: parseFloat(saccoSales.total),
-      credit_sales: parseFloat(creditSales.total),
-      transaction_count: parseInt(transactionCount.total),
-      low_stock_items: lowStockItems,
-      date: today,
+      ...summary,
+      low_stock_items: lowStock,
+      date: todayStr,
     });
   } catch (err) {
-    console.error('Dashboard summary error:', err);
-    res.status(500).json({ error: 'Failed to load dashboard summary.' });
+    console.error("Dashboard summary error:", err);
+    res.status(500).json({ error: "Failed to load dashboard summary." });
   }
 });
 
 // GET /api/dashboard/hourly-sales
-router.get('/hourly-sales', async (req, res) => {
+router.get("/hourly-sales", async (req, res) => {
   try {
-    const today = new Date().toISOString().split('T')[0];
+    const startOfDay = new Date();
+    startOfDay.setHours(0, 0, 0, 0);
+    const endOfDay = new Date();
+    endOfDay.setHours(23, 59, 59, 999);
     const shopId = req.user.shop_id;
 
-    const hourly = await getAll(`
-      SELECT 
-        EXTRACT(HOUR FROM created_at)::INTEGER as hour,
-        COALESCE(SUM(total_amount), 0) as total,
-        COUNT(*) as count
-      FROM sales
-      WHERE created_at::date = $1 AND shop_id = $2 AND status = 'completed'
-      GROUP BY EXTRACT(HOUR FROM created_at)
-      ORDER BY hour
-    `, [today, shopId]);
+    const sales = await prisma.sale.findMany({
+      where: {
+        shopId,
+        status: "completed",
+        createdAt: { gte: startOfDay, lte: endOfDay },
+      },
+    });
 
-    // Fill all 24 hours
+    const hourly = sales.reduce((acc, sale) => {
+      const hour = new Date(sale.createdAt).getHours();
+      if (!acc[hour]) acc[hour] = { total: 0, count: 0 };
+      acc[hour].total += parseFloat(sale.totalAmount);
+      acc[hour].count += 1;
+      return acc;
+    }, {});
+
     const result = [];
     for (let h = 6; h <= 22; h++) {
-      const found = hourly.find(r => r.hour === h);
       result.push({
-        hour: `${String(h).padStart(2, '0')}:00`,
-        total: found ? parseFloat(found.total) : 0,
-        count: found ? parseInt(found.count) : 0,
+        hour: `${String(h).padStart(2, "0")}:00`,
+        total: hourly[h]?.total || 0,
+        count: hourly[h]?.count || 0,
       });
     }
 
     res.json(result);
   } catch (err) {
-    console.error('Hourly sales error:', err);
-    res.status(500).json({ error: 'Failed to load hourly sales.' });
+    console.error("Hourly sales error:", err);
+    res.status(500).json({ error: "Failed to load hourly sales." });
   }
 });
 
 // GET /api/dashboard/top-items
-router.get('/top-items', async (req, res) => {
+router.get("/top-items", async (req, res) => {
   try {
-    const today = new Date().toISOString().split('T')[0];
+    const startOfDay = new Date();
+    startOfDay.setHours(0, 0, 0, 0);
     const shopId = req.user.shop_id;
 
-    const topItems = await getAll(`
-      SELECT 
-        si.item_name as name,
-        SUM(si.quantity) as quantity_sold,
-        SUM(si.subtotal) as revenue
-      FROM sale_items si
-      JOIN sales s ON si.sale_id = s.id
-      WHERE s.created_at::date = $1 AND s.shop_id = $2 AND s.status = 'completed'
-      GROUP BY si.item_id, si.item_name
-      ORDER BY quantity_sold DESC
-      LIMIT 5
-    `, [today, shopId]);
+    const saleItems = await prisma.saleItem.findMany({
+      where: {
+        shopId,
+        sale: { status: "completed", createdAt: { gte: startOfDay } },
+      },
+    });
 
-    res.json(topItems.map(i => ({
-      ...i,
-      quantity_sold: parseInt(i.quantity_sold),
-      revenue: parseFloat(i.revenue)
-    })));
+    const itemSummary = saleItems.reduce((acc, si) => {
+      if (!acc[si.itemId])
+        acc[si.itemId] = { name: si.itemName, quantity_sold: 0, revenue: 0 };
+      acc[si.itemId].quantity_sold += si.quantity;
+      acc[si.itemId].revenue += parseFloat(si.subtotal);
+      return acc;
+    }, {});
+
+    const result = Object.values(itemSummary)
+      .sort((a, b) => b.quantity_sold - a.quantity_sold)
+      .slice(0, 5);
+
+    res.json(result);
   } catch (err) {
-    console.error('Top items error:', err);
-    res.status(500).json({ error: 'Failed to load top items.' });
+    console.error("Top items error:", err);
+    res.status(500).json({ error: "Failed to load top items." });
   }
 });
 
 // GET /api/dashboard/recent-transactions
-router.get('/recent-transactions', async (req, res) => {
+router.get("/recent-transactions", async (req, res) => {
   try {
-    const today = new Date().toISOString().split('T')[0];
     const shopId = req.user.shop_id;
+    const startOfDay = new Date();
+    startOfDay.setHours(0, 0, 0, 0);
 
-    const transactions = await getAll(`
-      SELECT 
-        s.id, s.receipt_number, s.customer_name, s.total_amount,
-        s.payment_type, s.status, s.created_at,
-        COUNT(si.id) as item_count
-      FROM sales s
-      LEFT JOIN sale_items si ON s.id = si.sale_id
-      WHERE s.created_at::date = $1 AND s.shop_id = $2
-      GROUP BY s.id
-      ORDER BY s.created_at DESC
-      LIMIT 10
-    `, [today, shopId]);
+    const transactions = await prisma.sale.findMany({
+      where: { shopId, createdAt: { gte: startOfDay } },
+      include: { _count: { select: { saleItems: true } } },
+      orderBy: { createdAt: "desc" },
+      take: 10,
+    });
 
-    res.json(transactions.map(t => ({
-      ...t,
-      total_amount: parseFloat(t.total_amount),
-      item_count: parseInt(t.item_count)
-    })));
+    res.json(
+      transactions.map((t) => ({
+        id: t.id,
+        receipt_number: t.receiptNumber,
+        customer_name: t.customerName,
+        total_amount: parseFloat(t.totalAmount),
+        payment_type: t.paymentType,
+        status: t.status,
+        created_at: t.createdAt,
+        item_count: t._count.saleItems,
+      })),
+    );
   } catch (err) {
-    console.error('Recent transactions error:', err);
-    res.status(500).json({ error: 'Failed to load recent transactions.' });
+    console.error("Recent transactions error:", err);
+    res.status(500).json({ error: "Failed to load recent transactions." });
   }
 });
 
