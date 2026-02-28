@@ -3,7 +3,6 @@ const express = require("express");
 const cors = require("cors");
 const helmet = require("helmet");
 const morgan = require("morgan");
-const path = require("path");
 const prisma = require("./db/prisma");
 
 const authRoutes = require("./routes/auth");
@@ -86,13 +85,9 @@ app.get("/api/ping", (req, res) => {
   res.send("pong");
 });
 
-// Serve static files in production
-const clientBuildPath = path.join(__dirname, "..", "client", "dist");
-app.use(express.static(clientBuildPath));
-app.get("*", (req, res) => {
-  if (!req.path.startsWith("/api")) {
-    res.sendFile(path.join(clientBuildPath, "index.html"));
-  }
+// 404 for unknown routes — client is deployed separately at thingira-web.vercel.app
+app.use((req, res) => {
+  res.status(404).json({ error: "Route not found." });
 });
 
 // Error handling
