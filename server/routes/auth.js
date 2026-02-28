@@ -1,8 +1,7 @@
 const express = require("express");
-const jwt = require("jsonwebtoken");
 const prisma = require("../db/prisma");
 const supabase = require("../utils/supabase");
-const { JWT_SECRET, authenticateToken } = require("../middleware/auth");
+const { authenticateToken } = require("../middleware/auth");
 
 const router = express.Router();
 
@@ -15,7 +14,6 @@ router.post("/register", async (req, res) => {
   try {
     const { username, password, full_name, shop_name, phone } = req.body;
 
-    // Validation
     if (!username || !password || !full_name) {
       return res
         .status(400)
@@ -24,13 +22,10 @@ router.post("/register", async (req, res) => {
 
     // 1. Register in Supabase Auth
     const { data: authData, error: authError } = await supabase.auth.signUp({
-      email: `${username}@thingira.local`, // Fallback email since we use usernames
-      password: password,
+      email: `${username}@thingira.local`,
+      password,
       options: {
-        data: {
-          full_name,
-          username,
-        },
+        data: { full_name, username },
       },
     });
 
@@ -38,38 +33,35 @@ router.post("/register", async (req, res) => {
       return res.status(400).json({ error: authError.message });
     }
 
-    // 2. Handle Shop logic with Prisma
+    // 2. Handle Shop logic
     let finalShopName = shop_name || "ThingiraShop";
     let shop = await prisma.shop.findFirst({
       where: { name: { equals: finalShopName, mode: "insensitive" } },
     });
-
     if (!shop) {
-      shop = await prisma.shop.create({
-        data: { name: finalShopName },
-      });
+      shop = await prisma.shop.create({ data: { name: finalShopName } });
     }
 
-    // 3. Create local user record linked to Supabase UID
-    const shopUserCount = await prisma.user.count({
-      where: { shopId: shop.id },
-    });
+    // 3. Create local user profile
+    const shopUserCount = await prisma.user.count({ where: { shopId: shop.id } });
     const role = shopUserCount === 0 ? "admin" : "staff";
 
     const user = await prisma.user.create({
       data: {
-        username: username,
-        passwordHash: "SUPABASE_AUTH", // Managed by Supabase
+        username,
+        passwordHash: "SUPABASE_AUTH",
         fullName: full_name,
         shopId: shop.id,
         shopName: finalShopName,
         phone: phone || "",
-        role: role,
+        role,
       },
     });
 
-    const token = jwt.sign(
-      {
+    // Return Supabase session token directly — no custom JWT needed
+    res.status(201).json({
+      token: authData.session?.access_token,
+      user: {
         id: user.id,
         username: user.username,
         full_name: user.fullName,
@@ -77,11 +69,7 @@ router.post("/register", async (req, res) => {
         shop_id: user.shopId,
         role: user.role,
       },
-      JWT_SECRET,
-      { expiresIn: "24h" },
-    );
-
-    res.status(201).json({ token, user });
+    });
   } catch (err) {
     console.error("Registration error:", err);
     res.status(500).json({ error: "Server error during registration." });
@@ -93,23 +81,21 @@ router.post("/login", async (req, res) => {
   try {
     const { username, password } = req.body;
     if (!username || !password) {
-      return res
-        .status(400)
-        .json({ error: "Username and password are required." });
+      return res.status(400).json({ error: "Username and password are required." });
     }
 
-    // 1. Login with Supabase
+    // 1. Sign in with Supabase — returns session with access_token
     const { data: authData, error: authError } =
       await supabase.auth.signInWithPassword({
         email: `${username}@thingira.local`,
-        password: password,
+        password,
       });
 
-    if (authError) {
+    if (authError || !authData.session) {
       return res.status(401).json({ error: "Invalid username or password." });
     }
 
-    // 2. Get local user profile
+    // 2. Get local user profile for shop/role context
     const user = await prisma.user.findFirst({
       where: { username: { equals: username, mode: "insensitive" } },
     });
@@ -118,21 +104,8 @@ router.post("/login", async (req, res) => {
       return res.status(401).json({ error: "User profile not found." });
     }
 
-    const token = jwt.sign(
-      {
-        id: user.id,
-        username: user.username,
-        full_name: user.fullName,
-        shop_name: user.shopName,
-        shop_id: user.shopId,
-        role: user.role,
-      },
-      JWT_SECRET,
-      { expiresIn: "24h" },
-    );
-
     res.json({
-      token,
+      token: authData.session.access_token,
       user: {
         id: user.id,
         username: user.username,
