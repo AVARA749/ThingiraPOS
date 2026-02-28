@@ -1,5 +1,5 @@
 const express = require("express");
-const prisma = require("../db/prisma");
+const prisma = require("../prisma/client");
 const supabase = require("../utils/supabase");
 const { authenticateToken } = require("../middleware/auth");
 
@@ -43,7 +43,9 @@ router.post("/register", async (req, res) => {
     }
 
     // 3. Create local user profile
-    const shopUserCount = await prisma.user.count({ where: { shopId: shop.id } });
+    const shopUserCount = await prisma.user.count({
+      where: { shopId: shop.id },
+    });
     const role = shopUserCount === 0 ? "admin" : "staff";
 
     const user = await prisma.user.create({
@@ -81,7 +83,9 @@ router.post("/login", async (req, res) => {
   try {
     const { username, password } = req.body;
     if (!username || !password) {
-      return res.status(400).json({ error: "Username and password are required." });
+      return res
+        .status(400)
+        .json({ error: "Username and password are required." });
     }
 
     // 1. Sign in with Supabase — returns session with access_token

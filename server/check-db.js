@@ -1,4 +1,4 @@
-const prisma = require("./db/prisma");
+const prisma = require("./prisma/client");
 
 async function checkUsers() {
   try {

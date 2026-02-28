@@ -1,5 +1,5 @@
 const supabase = require("../utils/supabase");
-const prisma = require("../db/prisma");
+const prisma = require("../prisma/client");
 
 async function authenticateToken(req, res, next) {
   const authHeader = req.headers["authorization"];

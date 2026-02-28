@@ -1,5 +1,5 @@
 const express = require("express");
-const prisma = require("../db/prisma");
+const prisma = require("../prisma/client");
 const { authenticateToken } = require("../middleware/auth");
 
 const router = express.Router();
@@ -198,12 +198,10 @@ router.post("/", async (req, res) => {
       return purchaseResults;
     });
 
-    res
-      .status(201)
-      .json({
-        message: "Stock intake recorded successfully.",
-        purchases: results,
-      });
+    res.status(201).json({
+      message: "Stock intake recorded successfully.",
+      purchases: results,
+    });
   } catch (err) {
     console.error("Purchase error:", err);
     res

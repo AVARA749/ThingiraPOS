@@ -1,5 +1,5 @@
 const express = require("express");
-const prisma = require("../db/prisma");
+const prisma = require("../prisma/client");
 const { authenticateToken } = require("../middleware/auth");
 
 const router = express.Router();
@@ -276,12 +276,10 @@ router.delete("/:id", async (req, res) => {
       where: { itemId: itemId, shopId: shopId },
     });
     if (hasSales > 0) {
-      return res
-        .status(400)
-        .json({
-          error:
-            "Cannot delete item with existing sales records. Consider zeroing the stock instead.",
-        });
+      return res.status(400).json({
+        error:
+          "Cannot delete item with existing sales records. Consider zeroing the stock instead.",
+      });
     }
 
     await prisma.$transaction([
