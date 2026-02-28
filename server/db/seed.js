@@ -1,53 +1,98 @@
-const bcrypt = require("bcryptjs");
+/**
+ * Production-safe seed script
+ *
+ * Creates the initial admin user via Supabase Auth + local Prisma profile.
+ * Safe to re-run — skips if the admin already exists.
+ *
+ * Usage (point at production DB):
+ *   DATABASE_URL=<prod-url> SUPABASE_URL=<url> SUPABASE_ANON_KEY=<key> node server/db/seed.js
+ *
+ * Or locally for dev:
+ *   node server/db/seed.js
+ */
+
+require("dotenv").config({
+  path: require("path").resolve(__dirname, "../../server/.env"),
+});
+
 const prisma = require("./prisma");
+const supabase = require("../utils/supabase");
+
+const ADMIN_USERNAME = "admin";
+const ADMIN_PASSWORD = "thingira2024";
+const ADMIN_FULL_NAME = "James Mwangi";
+const ADMIN_PHONE = "0722000111";
+const SHOP_NAME = "Thingira Main Shop";
+const SHOP_ADDRESS = "Nyeri, Kenya";
 
 async function seed() {
-  console.log("🧹 Cleaning ThingiraShop database...\n");
+  console.log("🌱 Starting ThingiraPOS seed...\n");
 
   try {
-    // Clear all data in reverse order of dependencies
-    await prisma.creditPayment.deleteMany();
-    await prisma.creditLedger.deleteMany();
-    await prisma.stockMovement.deleteMany();
-    await prisma.saleItem.deleteMany();
-    await prisma.sale.deleteMany();
-    await prisma.purchase.deleteMany();
-    await prisma.item.deleteMany();
-    await prisma.customer.deleteMany();
-    await prisma.supplier.deleteMany();
-    await prisma.shiftRegister.deleteMany();
-    await prisma.generalLedger.deleteMany();
-    await prisma.user.deleteMany();
-    await prisma.shop.deleteMany();
+    // 1. Check if admin already exists locally
+    const existingUser = await prisma.user.findFirst({
+      where: { username: { equals: ADMIN_USERNAME, mode: "insensitive" } },
+    });
 
-    // Create initial admin user (Note: This might need a Shop if we enforce it)
-    const passwordHash = bcrypt.hashSync("thingira2024", 10);
+    if (existingUser) {
+      console.log(
+        `⚠️  Admin user '${ADMIN_USERNAME}' already exists. Skipping.`,
+      );
+      console.log("✅ Seed complete — nothing changed.\n");
+      return;
+    }
 
-    // We might need to create a shop first if foreign keys are strict
-    const shop = await prisma.shop.create({
-      data: {
-        name: "Thingira Main Shop",
-        address: "Nyeri, Kenya",
+    // 2. Ensure shop exists
+    let shop = await prisma.shop.findFirst({
+      where: { name: { equals: SHOP_NAME, mode: "insensitive" } },
+    });
+    if (!shop) {
+      shop = await prisma.shop.create({
+        data: { name: SHOP_NAME, address: SHOP_ADDRESS },
+      });
+      console.log(`🏪 Shop created: ${shop.name}`);
+    } else {
+      console.log(`🏪 Shop already exists: ${shop.name}`);
+    }
+
+    // 3. Register admin in Supabase Auth
+    const { data: authData, error: authError } = await supabase.auth.signUp({
+      email: `${ADMIN_USERNAME}@thingira.local`,
+      password: ADMIN_PASSWORD,
+      options: {
+        data: { full_name: ADMIN_FULL_NAME, username: ADMIN_USERNAME },
       },
     });
 
+    if (authError) {
+      // If already registered in Supabase, continue to create local profile
+      console.log(
+        `⚠️  Supabase Auth: ${authError.message} — proceeding to create local profile.`,
+      );
+    } else {
+      console.log(
+        `🔐 Supabase Auth user created: ${ADMIN_USERNAME}@thingira.local`,
+      );
+    }
+
+    // 4. Create local user profile
     await prisma.user.create({
       data: {
-        username: "admin",
-        passwordHash: passwordHash,
-        fullName: "James Mwangi",
+        username: ADMIN_USERNAME,
+        passwordHash: "SUPABASE_AUTH",
+        fullName: ADMIN_FULL_NAME,
+        phone: ADMIN_PHONE,
         role: "admin",
-        phone: "0722000111",
         shopId: shop.id,
+        shopName: SHOP_NAME,
       },
     });
 
-    console.log("👤 Admin user created (admin / thingira2024)");
-    console.log(`🏪 Default shop created: ${shop.name}`);
-    console.log("\n✅ Database cleaned! All tables are empty.");
-    console.log("📌 Login: admin / thingira2024\n");
+    console.log(`👤 Admin profile created: ${ADMIN_USERNAME}`);
+    console.log("\n✅ Seed complete!");
+    console.log(`📌 Login: ${ADMIN_USERNAME} / ${ADMIN_PASSWORD}\n`);
   } catch (err) {
-    console.error("❌ Seeding error:", err);
+    console.error("❌ Seed error:", err);
   } finally {
     await prisma.$disconnect();
   }
