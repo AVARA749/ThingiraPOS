@@ -96,32 +96,23 @@ app.use((err, req, res, next) => {
   res.status(500).json({ error: "Internal server error." });
 });
 
-// Initialize database and start server
-const startServer = async () => {
-  try {
-    // Test Prisma connection
-    await prisma.$connect();
-    console.log("✅ Prisma connected to database");
-
-    app.listen(PORT, "0.0.0.0", () => {
-      console.log(`\n🏪 ThingiraShop API running on http://0.0.0.0:${PORT}`);
-      console.log(`📦 Database: Supabase/Prisma (Connected)\n`);
-    });
-  } catch (err) {
-    console.error("❌ Failed to start server:", err);
-    process.exit(1);
-  }
-};
-
-startServer();
-
-process.on("SIGINT", async () => {
-  await prisma.$disconnect();
-  process.exit(0);
-});
-process.on("SIGTERM", async () => {
-  await prisma.$disconnect();
-  process.exit(0);
-});
-
+// Vercel serverless — export app immediately, no blocking startup
+// Prisma connects lazily on first query (no $connect() needed)
 module.exports = app;
+
+// Local dev only
+if (process.env.NODE_ENV !== "production") {
+  const PORT = process.env.PORT || 5000;
+  app.listen(PORT, "0.0.0.0", () => {
+    console.log(`\n🏪 ThingiraShop API running on http://0.0.0.0:${PORT}`);
+  });
+
+  process.on("SIGINT", async () => {
+    await prisma.$disconnect();
+    process.exit(0);
+  });
+  process.on("SIGTERM", async () => {
+    await prisma.$disconnect();
+    process.exit(0);
+  });
+}
