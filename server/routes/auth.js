@@ -19,6 +19,24 @@ router.post("/register", async (req, res) => {
       });
     }
 
+    // 0. Check if user already exists locally
+    const existingUser = await prisma.user.findFirst({
+      where: {
+        OR: [
+          { username: { equals: username, mode: "insensitive" } },
+          { email: { equals: email, mode: "insensitive" } },
+        ],
+      },
+    });
+
+    if (existingUser) {
+      const field =
+        existingUser.username.toLowerCase() === username.toLowerCase() ?
+          "Username"
+        : "Email";
+      return res.status(400).json({ error: `${field} is already taken.` });
+    }
+
     // 1. Register in Supabase Auth
     const { data: authData, error: authError } = await supabase.auth.signUp({
       email,
@@ -74,6 +92,11 @@ router.post("/register", async (req, res) => {
     });
   } catch (err) {
     console.error("Registration error:", err);
+    if (err.code === "P2002") {
+      return res
+        .status(400)
+        .json({ error: "Username or email is already in use." });
+    }
     res.status(500).json({ error: "Server error during registration." });
   }
 });
