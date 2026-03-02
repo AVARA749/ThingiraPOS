@@ -27,14 +27,15 @@ app.use(
     crossOriginEmbedderPolicy: false,
   }),
 );
-// CORS: allow the deployed client origin and localhost for dev
+// CORS: allow origins from env (comma-separated) or default to localhost dev servers
 const allowedOrigins = (process.env.CLIENT_ORIGIN || "")
   .split(",")
   .map((o) => o.trim().replace(/\/$/, ""))
   .filter(Boolean);
 
+// Default dev origins if none specified
 if (allowedOrigins.length === 0) {
-  allowedOrigins.push("http://localhost:3000", "http://127.0.0.1:3000");
+  allowedOrigins.push("http://localhost:5173", "http://localhost:3000");
 }
 
 app.use(
