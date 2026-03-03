@@ -1,29 +1,24 @@
-const supabase = require("../utils/supabase");
+const { getAuth, clerkClient } = require("@clerk/express");
 const prisma = require("../prisma/client");
 
 async function authenticateToken(req, res, next) {
-  const authHeader = req.headers["authorization"];
-  const token = authHeader && authHeader.split(" ")[1];
-
-  if (!token) {
-    return res.status(401).json({ error: "Access denied. No token provided." });
-  }
-
   try {
-    // Validate the token with Supabase — no JWT_SECRET needed
-    const {
-      data: { user },
-      error,
-    } = await supabase.auth.getUser(token);
-
-    if (error || !user) {
-      return res.status(401).json({ error: "Invalid or expired token." });
+    const auth = getAuth(req);
+    
+    if (!auth.userId) {
+      return res.status(401).json({ error: "Access denied. No token provided or token invalid." });
     }
 
+    const clerkUser = await clerkClient.users.getUser(auth.userId);
+
+    const email = clerkUser.emailAddresses[0]?.emailAddress;
+    const fullName = `${clerkUser.firstName || ''} ${clerkUser.lastName || ''}`.trim();
+    const username = clerkUser.username || email.split('@')[0];
+
     // Fetch local user profile for shop/role context
-    const localUser = await prisma.user.findFirst({
+    let localUser = await prisma.user.findFirst({
       where: {
-        username: { equals: user.user_metadata?.username, mode: "insensitive" },
+        clerkUserId: auth.userId,
       },
       select: {
         id: true,
@@ -36,7 +31,26 @@ async function authenticateToken(req, res, next) {
     });
 
     if (!localUser) {
-      return res.status(401).json({ error: "User profile not found." });
+      // Auto-create user on first login
+      const shop = await prisma.shop.create({
+        data: {
+          name: `${fullName || username}'s Shop`,
+          phone: "",
+        },
+      });
+
+      localUser = await prisma.user.create({
+        data: {
+          username: username,
+          email: email,
+          passwordHash: "CLERK_AUTH",
+          fullName: fullName,
+          shopName: shop.name,
+          role: "admin",
+          shopId: shop.id,
+          clerkUserId: auth.userId,
+        },
+      });
     }
 
     req.user = {
