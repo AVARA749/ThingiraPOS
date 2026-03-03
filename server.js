@@ -4,6 +4,7 @@ const cors = require("cors");
 const helmet = require("helmet");
 const morgan = require("morgan");
 const prisma = require("./prisma/client");
+const { clerkMiddleware } = require("@clerk/express");
 
 const authRoutes = require("./routes/auth");
 const dashboardRoutes = require("./routes/dashboard");
@@ -62,6 +63,7 @@ app.use(
 app.use(morgan("dev"));
 app.use(express.json({ limit: "10mb" }));
 app.use(express.urlencoded({ extended: true }));
+app.use(clerkMiddleware());
 
 // Custom Request Logger
 app.use((req, res, next) => {

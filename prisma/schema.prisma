@@ -44,7 +44,7 @@ model User {
   updatedAt      DateTime @default(now()) @updatedAt @map("updated_at")
   shopId         Int?     @map("shop_id")
   shop           Shop?    @relation(fields: [shopId], references: [id], onDelete: Cascade)
-  supabaseUserId String?  @unique @map("supabase_user_id")
+  clerkUserId    String?  @unique @map("clerk_user_id")
 
   shiftRegisters ShiftRegister[]
 
