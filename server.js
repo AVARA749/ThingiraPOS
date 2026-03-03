@@ -28,7 +28,7 @@ app.use(
     crossOriginEmbedderPolicy: false,
   }),
 );
-// CORS: allow origins from env (comma-separated) or default to localhost dev servers
+// CORS: allow origins from env
 const allowedOrigins = (process.env.CLIENT_ORIGIN || "")
   .split(",")
   .map((o) => o.trim().replace(/\/$/, ""))
