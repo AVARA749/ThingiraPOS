@@ -1,11 +1,11 @@
 /**
  * Production-safe seed script
  *
- * Creates the initial admin user via Supabase Auth + local Prisma profile.
+ * Creates the initial admin user via Clerk Auth + local Prisma profile.
  * Safe to re-run — skips if the admin already exists.
  *
  * Usage (point at production DB):
- *   DATABASE_URL=<prod-url> SUPABASE_URL=<url> SUPABASE_ANON_KEY=<key> node server/db/seed.js
+ *   DATABASE_URL=<prod-url> CLERK_SECRET_KEY=<key> node server/prisma/seed.js
  *
  * Or locally for dev:
  *   node server/db/seed.js
@@ -16,9 +16,10 @@ require("dotenv").config({
 });
 
 const prisma = require("./client");
-const supabase = require("../utils/supabase");
+const { clerkClient } = require("@clerk/express");
 
 const ADMIN_USERNAME = "admin";
+const ADMIN_EMAIL = "annahirpeters@gmail.com";
 const ADMIN_PASSWORD = "thingira2024";
 const ADMIN_FULL_NAME = "James Mwangi";
 const ADMIN_PHONE = "0722000111";
@@ -55,23 +56,35 @@ async function seed() {
       console.log(`🏪 Shop already exists: ${shop.name}`);
     }
 
-    // 3. Register admin in Supabase Auth
-    const { data: authData, error: authError } = await supabase.auth.signUp({
-      email: `${ADMIN_USERNAME}@thingira.local`,
-      password: ADMIN_PASSWORD,
-      options: {
-        data: { full_name: ADMIN_FULL_NAME, username: ADMIN_USERNAME },
-      },
-    });
+    // 3. Register admin in Clerk Auth
+    let clerkUserId = null;
+    const email = ADMIN_EMAIL;
 
-    if (authError) {
-      // If already registered in Supabase, continue to create local profile
+    try {
+      // First check if user exists in Clerk
+      const userList = await clerkClient.users.getUserList({
+        emailAddress: [email],
+      });
+
+      if (userList.data && userList.data.length > 0) {
+        clerkUserId = userList.data[0].id;
+        console.log(
+          `⚠️  Clerk Auth user already exists: ${clerkUserId} — proceeding to create local profile.`,
+        );
+      } else {
+        const authData = await clerkClient.users.createUser({
+          emailAddress: [email],
+          password: ADMIN_PASSWORD,
+          firstName: ADMIN_FULL_NAME.split(" ")[0],
+          lastName: ADMIN_FULL_NAME.split(" ").slice(1).join(" "),
+          username: ADMIN_USERNAME,
+        });
+        clerkUserId = authData.id;
+        console.log(`🔐 Clerk Auth user created: ${email} (${clerkUserId})`);
+      }
+    } catch (authError) {
       console.log(
-        `⚠️  Supabase Auth: ${authError.message} — proceeding to create local profile.`,
-      );
-    } else {
-      console.log(
-        `🔐 Supabase Auth user created: ${ADMIN_USERNAME}@thingira.local`,
+        `⚠️  Clerk Auth Error: ${authError.errors?.[0]?.message || authError.message} — proceeding to create local profile.`,
       );
     }
 
@@ -79,12 +92,14 @@ async function seed() {
     await prisma.user.create({
       data: {
         username: ADMIN_USERNAME,
-        passwordHash: "SUPABASE_AUTH",
+        email: email,
+        passwordHash: "CLERK_AUTH",
         fullName: ADMIN_FULL_NAME,
         phone: ADMIN_PHONE,
         role: "admin",
         shopId: shop.id,
         shopName: SHOP_NAME,
+        clerkUserId: clerkUserId,
       },
     });
 

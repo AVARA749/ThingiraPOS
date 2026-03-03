@@ -11,7 +11,7 @@ Express.js + Prisma backend for the ThingiraShop POS system.
 | Runtime  | Node.js + Express     |
 | ORM      | Prisma                |
 | Database | Supabase (PostgreSQL) |
-| Auth     | Supabase Auth + JWT   |
+| Auth     | Clerk                 |
 
 ## API Routes
 
@@ -48,8 +48,8 @@ DATABASE_URL=postgresql://postgres.[ref]:[pass]@...pooler.supabase.com:6543/post
 DIRECT_URL=postgresql://postgres.[ref]:[pass]@...supabase.com:5432/postgres
 JWT_SECRET=your-long-random-secret
 SUPABASE_URL=https://your-project.supabase.co
-SUPABASE_ANON_KEY=your-anon-key
-SUPABASE_SERVICE_ROLE_KEY=your-service-role-key
+CLERK_SECRET_KEY=your-clerk-secret-key
+CLERK_PUBLISHABLE_KEY=your-clerk-publishable-key
 CLIENT_ORIGIN=http://localhost:3000
 ```
 
@@ -57,7 +57,7 @@ CLIENT_ORIGIN=http://localhost:3000
 
 ```bash
 cd server
-npx prisma db pull   # pull existing Supabase schema
+npx prisma db pull   # pull existing schema
 npx prisma generate  # generate client
 ```
 
@@ -74,28 +74,29 @@ Server runs on `http://localhost:5000`.
 
 Set these in Vercel → Settings → Environment Variables:
 
-| Key                       | Value                             |
-| ------------------------- | --------------------------------- |
-| `DATABASE_URL`            | Supabase pooler URL (port 6543)   |
-| `DIRECT_URL`              | Supabase direct URL (port 5432)   |
-| `JWT_SECRET`              | A long random string              |
-| `SUPABASE_URL`            | Your Supabase project URL         |
-| `SUPABASE_ANON_KEY`       | Your Supabase anon key            |
-| `SUPABASE_SERVICE_ROLE_KEY` | Your Supabase service role key (for admin operations) |
-| `CLIENT_ORIGIN`           | `https://thingira-web.vercel.app` |
+| Key                     | Value                             |
+| ----------------------- | --------------------------------- |
+| `DATABASE_URL`          | Supabase pooler URL (port 6543)   |
+| `DIRECT_URL`            | Supabase direct URL (port 5432)   |
+| `JWT_SECRET`            | A long random string              |
+| `CLERK_SECRET_KEY`      | Your Clerk Secret Key             |
+| `CLERK_PUBLISHABLE_KEY` | Your Clerk Publishable Key        |
+| `CLIENT_ORIGIN`         | `https://thingira-web.vercel.app` |
 
-## Why Local Database + Supabase Auth?
+## Why Local Database + Clerk Auth?
 
-You might wonder: **"Why not use Supabase for everything?"**
+You might wonder: **"Why not use Clerk/Supabase for everything?"**
 
-### Supabase Auth vs Local Business Data
+### Clerk Auth vs Local Business Data
 
-**Supabase Auth** handles:
+**Clerk Auth** handles:
+
 - User authentication (login, passwords, email verification)
 - OAuth providers (Google, GitHub, etc.)
-- JWT tokens and session management
+- Session management
 
 **Local PostgreSQL (via Prisma)** handles:
+
 - Business data: Shops, inventory items, sales transactions
 - Customer credit records, supplier information
 - Stock movements, shift registers
@@ -103,7 +104,7 @@ You might wonder: **"Why not use Supabase for everything?"**
 
 ### Why Separate?
 
-1. **Supabase Auth is for identity only** - It stores user credentials and metadata, not your business logic data
+1. **Clerk Auth is for identity only** - It stores user credentials and metadata, not your business logic data
 2. **Complex relationships** - Shops have items, items have sales, sales have customers - these complex relationships are better managed in your own database schema
 3. **Custom business logic** - Credit tracking, inventory management, shift registers - these are specific to your POS system
 4. **Data ownership** - Your business data stays in your control, separate from the auth provider
@@ -112,12 +113,12 @@ You might wonder: **"Why not use Supabase for everything?"**
 ### How They Work Together
 
 ```
-User logs in → Supabase Auth verifies credentials → Returns JWT token
+User logs in → Clerk Auth verifies credentials → Returns Session token
                                         ↓
-                   API uses JWT to identify user → Queries local DB for shop/items/sales
+                  API uses token to identify user → Queries local DB for shop/items/sales
 ```
 
-The `supabaseUserId` field in the User table links your local user records to Supabase auth users.
+The `clerkUserId` field in the User table links your local user records to Clerk auth users.
 
 ## Business Rules
 
