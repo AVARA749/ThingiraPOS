@@ -13,9 +13,9 @@
     "postinstall": "prisma generate"
   },
   "dependencies": {
+    "@clerk/express": "^1.7.76",
     "@prisma/adapter-pg": "^7.4.2",
     "@prisma/client": "^7.4.2",
-    "@supabase/supabase-js": "^2.45.4",
     "bcryptjs": "^2.4.3",
     "cors": "^2.8.5",
     "dotenv": "^17.3.1",
