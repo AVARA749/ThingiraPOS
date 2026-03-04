@@ -7,8 +7,8 @@ datasource db {
 }
 
 model Shop {
-  id        Int      @id @default(autoincrement())
-  name      String
+  id        String   @id @default(uuid()) @db.Uuid
+  name      String   @unique
   address   String?
   phone     String?
   email     String?
@@ -32,19 +32,19 @@ model Shop {
 }
 
 model User {
-  id             Int      @id @default(autoincrement())
-  username       String   @unique
-  email          String?  @unique
-  passwordHash   String   @map("password_hash")
-  fullName       String   @map("full_name")
-  shopName       String?  @map("shop_name")
-  phone          String?
-  role           String   @default("admin")
-  createdAt      DateTime @default(now()) @map("created_at")
-  updatedAt      DateTime @default(now()) @updatedAt @map("updated_at")
-  shopId         Int?     @map("shop_id")
-  shop           Shop?    @relation(fields: [shopId], references: [id], onDelete: Cascade)
-  clerkUserId    String?  @unique @map("clerk_user_id")
+  id           Int      @id @default(autoincrement())
+  username     String   @unique
+  email        String?  @unique
+  passwordHash String   @map("password_hash")
+  fullName     String   @map("full_name")
+  shopName     String?  @map("shop_name")
+  phone        String?
+  role         String   @default("staff")
+  createdAt    DateTime @default(now()) @map("created_at")
+  updatedAt    DateTime @default(now()) @updatedAt @map("updated_at")
+  shopId       String?  @map("shop_id") @db.Uuid
+  shop         Shop?    @relation(fields: [shopId], references: [id], onDelete: Cascade)
+  clerkUserId  String?  @unique @map("clerk_user_id")
 
   shiftRegisters ShiftRegister[]
 
@@ -59,7 +59,7 @@ model Supplier {
   email     String?
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @default(now()) @updatedAt @map("updated_at")
-  shopId    Int?     @map("shop_id")
+  shopId    String?  @map("shop_id") @db.Uuid
   shop      Shop?    @relation(fields: [shopId], references: [id], onDelete: Cascade)
 
   items Item[]
@@ -79,7 +79,7 @@ model Item {
   barcode       String?
   createdAt     DateTime @default(now()) @map("created_at")
   updatedAt     DateTime @default(now()) @updatedAt @map("updated_at")
-  shopId        Int?     @map("shop_id")
+  shopId        String?  @map("shop_id") @db.Uuid
   shop          Shop?    @relation(fields: [shopId], references: [id], onDelete: Cascade)
 
   supplier Supplier? @relation(fields: [supplierId], references: [id])
@@ -97,7 +97,7 @@ model Purchase {
   datePurchased DateTime @default(now()) @map("date_purchased") @db.Date
   notes         String?
   createdAt     DateTime @default(now()) @map("created_at")
-  shopId        Int?     @map("shop_id")
+  shopId        String?  @map("shop_id") @db.Uuid
   shop          Shop?    @relation(fields: [shopId], references: [id], onDelete: Cascade)
 
   @@map("purchases")
@@ -112,12 +112,11 @@ model Customer {
   totalCredit Decimal? @default(0) @map("total_credit") @db.Decimal(10, 2)
   createdAt   DateTime @default(now()) @map("created_at")
   updatedAt   DateTime @default(now()) @updatedAt @map("updated_at")
-  shopId      Int?     @map("shop_id")
+  shopId      String?  @map("shop_id") @db.Uuid
   shop        Shop?    @relation(fields: [shopId], references: [id], onDelete: Cascade)
 
-  sales          Sale[]
-  creditLedgers  CreditLedger[]
-  creditPayments CreditPayment[]
+  sales         Sale[]
+  creditLedgers CreditLedger[]
 
   @@map("customers")
 }
@@ -133,7 +132,7 @@ model Sale {
   status        String?  @default("completed")
   notes         String?
   createdAt     DateTime @default(now()) @map("created_at")
-  shopId        Int?     @map("shop_id")
+  shopId        String?  @map("shop_id") @db.Uuid
   shop          Shop?    @relation(fields: [shopId], references: [id], onDelete: Cascade)
 
   customer  Customer?  @relation(fields: [customerId], references: [id])
@@ -153,7 +152,7 @@ model SaleItem {
   buyingPrice Decimal  @default(0) @map("buying_price") @db.Decimal(10, 2)
   subtotal    Decimal  @map("subtotal") @db.Decimal(10, 2)
   createdAt   DateTime @default(now()) @map("created_at")
-  shopId      Int?     @map("shop_id")
+  shopId      String?  @map("shop_id") @db.Uuid
   shop        Shop?    @relation(fields: [shopId], references: [id], onDelete: Cascade)
 
   sale Sale @relation(fields: [saleId], references: [id], onDelete: Cascade)
@@ -173,7 +172,7 @@ model StockMovement {
   supplierName  String?  @map("supplier_name")
   notes         String?
   createdAt     DateTime @default(now()) @map("created_at")
-  shopId        Int?     @map("shop_id")
+  shopId        String?  @map("shop_id") @db.Uuid
   shop          Shop?    @relation(fields: [shopId], references: [id], onDelete: Cascade)
 
   @@map("stock_movements")
@@ -192,7 +191,7 @@ model CreditLedger {
   notes        String?
   createdAt    DateTime  @default(now()) @map("created_at")
   updatedAt    DateTime  @default(now()) @updatedAt @map("updated_at")
-  shopId       Int?      @map("shop_id")
+  shopId       String?   @map("shop_id") @db.Uuid
   shop         Shop?     @relation(fields: [shopId], references: [id], onDelete: Cascade)
 
   customer Customer @relation(fields: [customerId], references: [id])
@@ -201,51 +200,46 @@ model CreditLedger {
 }
 
 model CreditPayment {
-  id          Int      @id @default(autoincrement())
-  customerId  Int      @map("customer_id")
-  ledgerId    Int?     @map("ledger_id")
-  amount      Decimal  @map("amount") @db.Decimal(10, 2)
-  paymentDate DateTime @default(now()) @map("payment_date") @db.Date
-  notes       String?
-  shopId      Int?     @map("shop_id")
-  shop        Shop?    @relation(fields: [shopId], references: [id], onDelete: Cascade)
-
-  customer Customer @relation(fields: [customerId], references: [id])
+  id            Int      @id @default(autoincrement())
+  creditId      Int      @map("credit_id")
+  customerId    Int      @map("customer_id")
+  amount        Decimal  @db.Decimal(10, 2)
+  paymentMethod String   @default("cash") @map("payment_method")
+  notes         String?
+  createdAt     DateTime @default(now()) @map("created_at")
+  shopId        String?  @map("shop_id") @db.Uuid
+  shop          Shop?    @relation(fields: [shopId], references: [id], onDelete: Cascade)
 
   @@map("credit_payments")
 }
 
 model GeneralLedger {
-  id            Int      @id @default(autoincrement())
-  shopId        Int?     @map("shop_id")
-  accountName   String   @map("account_name")
-  accountType   String   @map("account_type")
-  debit         Decimal? @default(0) @db.Decimal(12, 2)
-  credit        Decimal? @default(0) @db.Decimal(12, 2)
-  referenceType String?  @map("reference_type")
-  referenceId   Int?     @map("reference_id")
-  description   String?
-  createdAt     DateTime @default(now()) @map("created_at")
-  shop          Shop?    @relation(fields: [shopId], references: [id], onDelete: Cascade)
+  id          Int      @id @default(autoincrement())
+  date        DateTime @db.Date
+  description String
+  debit       Decimal? @db.Decimal(10, 2)
+  credit      Decimal? @db.Decimal(10, 2)
+  balance     Decimal  @db.Decimal(10, 2)
+  reference   String?
+  createdAt   DateTime @default(now()) @map("created_at")
+  shopId      String?  @map("shop_id") @db.Uuid
+  shop        Shop?    @relation(fields: [shopId], references: [id], onDelete: Cascade)
 
   @@map("general_ledger")
 }
 
 model ShiftRegister {
-  id           Int       @id @default(autoincrement())
-  shopId       Int?      @map("shop_id")
-  userId       Int?      @map("user_id")
-  startTime    DateTime  @default(now()) @map("start_time")
-  endTime      DateTime? @map("end_time")
-  startCash    Decimal   @default(0) @map("start_cash") @db.Decimal(10, 2)
-  expectedCash Decimal?  @map("expected_cash") @db.Decimal(10, 2)
-  actualCash   Decimal?  @map("actual_cash") @db.Decimal(10, 2)
-  variance     Decimal?  @db.Decimal(10, 2)
-  status       String?   @default("open")
-  notes        String?
-  createdAt    DateTime  @default(now()) @map("created_at")
-  shop         Shop?     @relation(fields: [shopId], references: [id], onDelete: Cascade)
-  user         User?     @relation(fields: [userId], references: [id])
+  id        Int       @id @default(autoincrement())
+  userId    Int       @map("user_id")
+  user      User      @relation(fields: [userId], references: [id])
+  startTime DateTime  @map("start_time")
+  endTime   DateTime? @map("end_time")
+  startCash Decimal   @map("start_cash") @db.Decimal(10, 2)
+  endCash   Decimal?  @map("end_cash") @db.Decimal(10, 2)
+  status    String    @default("open")
+  createdAt DateTime  @default(now()) @map("created_at")
+  shopId    String?   @map("shop_id") @db.Uuid
+  shop      Shop?     @relation(fields: [shopId], references: [id], onDelete: Cascade)
 
   @@map("shift_registers")
 }
