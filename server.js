@@ -16,6 +16,8 @@ const customerRoutes = require("./routes/customers");
 const stockRoutes = require("./routes/stock");
 const reportRoutes = require("./routes/reports");
 const shiftRoutes = require("./routes/shifts");
+const shopRoutes = require("./routes/shops");
+const staffRoutes = require("./routes/staff");
 
 const app = express();
 const PORT = process.env.PORT || 5000;
@@ -89,6 +91,8 @@ app.use("/api/customers", customerRoutes);
 app.use("/api/stock", stockRoutes);
 app.use("/api/reports", reportRoutes);
 app.use("/api/shifts", shiftRoutes);
+app.use("/api/shops", shopRoutes);
+app.use("/api/staff", staffRoutes);
 
 // Health checks
 app.get("/api/health", (req, res) => {
