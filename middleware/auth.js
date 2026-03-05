@@ -16,8 +16,14 @@ const prisma = require("../prisma/client");
 async function authenticateToken(req, res, next) {
   try {
     const auth = getAuth(req);
+    
+    // Debug logging
+    console.log("[Auth] Request path:", req.originalUrl);
+    console.log("[Auth] Authorization header:", req.headers.authorization ? "Present" : "Missing");
+    console.log("[Auth] getAuth result:", { userId: auth.userId, sessionId: auth.sessionId });
 
     if (!auth.userId) {
+      console.log("[Auth] No userId found - token invalid or missing");
       return res.status(401).json({
         error: "Access denied. No token provided or token invalid.",
         code: "NO_AUTH_TOKEN",
