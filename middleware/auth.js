@@ -1,4 +1,4 @@
-const { getAuth } = require("@clerk/express");
+const { getAuth, clerkClient } = require("@clerk/express");
 const prisma = require("../prisma/client");
 
 /**
@@ -41,11 +41,77 @@ async function authenticateToken(req, res, next) {
     });
 
     if (!dbUser) {
-      // If the user is not found, it means the webhook hasn't processed yet or failed.
-      // We return 403 USER_NOT_FOUND, allowing the client to poll or show a waiting state.
+      // Webhook fallback: try to fetch user from Clerk and create locally
+      console.log(`[Auth] User ${auth.userId} not in DB, fetching from Clerk...`);
+      
+      try {
+        const clerkUser = await clerkClient.users.getUser(auth.userId);
+        const email = clerkUser.emailAddresses?.[0]?.emailAddress;
+        
+        if (email) {
+          // Check for existing user by email
+          const existing = await prisma.user.findFirst({
+            where: { email },
+            select: { id: true }
+          });
+          
+          if (existing) {
+            // Link existing user
+            await prisma.user.update({
+              where: { id: existing.id },
+              data: { clerkUserId: auth.userId }
+            });
+            console.log(`[Auth] Linked user ${existing.id} to Clerk ${auth.userId}`);
+          } else {
+            // Create new user
+            const fullName = `${clerkUser.firstName || ""} ${clerkUser.lastName || ""}`.trim() || email.split("@")[0];
+            await prisma.user.create({
+              data: {
+                clerkUserId: auth.userId,
+                email,
+                fullName,
+                username: email.split("@")[0],
+                role: "staff"
+              }
+            });
+            console.log(`[Auth] Created user from Clerk: ${email}`);
+          }
+          
+          // Re-fetch the user we just created/linked
+          const newDbUser = await prisma.user.findFirst({
+            where: { clerkUserId: auth.userId },
+            select: {
+              id: true,
+              username: true,
+              fullName: true,
+              shopId: true,
+              shopName: true,
+              role: true,
+              clerkUserId: true,
+              email: true,
+            },
+          });
+          
+          if (newDbUser) {
+            // Attach and continue
+            req.user = {
+              id: newDbUser.id,
+              username: newDbUser.username,
+              full_name: newDbUser.fullName,
+              shop_id: newDbUser.shopId,
+              shop_name: newDbUser.shopName,
+              role: newDbUser.role,
+              email: newDbUser.email,
+            };
+            return next();
+          }
+        }
+      } catch (err) {
+        console.error("[Auth] Clerk fallback failed:", err.message);
+      }
+      
       return res.status(403).json({
-        error:
-          "Account not found or sync in progress. Please wait a moment or contact your admin.",
+        error: "Account not found. Please try signing in again.",
         code: "USER_NOT_FOUND",
         needsShop: false,
       });
