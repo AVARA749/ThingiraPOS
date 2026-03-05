@@ -18,6 +18,7 @@ const reportRoutes = require("./routes/reports");
 const shiftRoutes = require("./routes/shifts");
 const shopRoutes = require("./routes/shops");
 const staffRoutes = require("./routes/staff");
+const webhookRoutes = require("./routes/webhooks");
 
 const app = express();
 const PORT = process.env.PORT || 5000;
@@ -63,6 +64,11 @@ app.use(
   }),
 );
 app.use(morgan("dev"));
+
+// Webhook route MUST be registered BEFORE express.json()
+// Svix signature verification requires the raw, unparsed request body
+app.use("/api/webhooks", webhookRoutes);
+
 app.use(express.json({ limit: "10mb" }));
 app.use(express.urlencoded({ extended: true }));
 app.use(clerkMiddleware());
