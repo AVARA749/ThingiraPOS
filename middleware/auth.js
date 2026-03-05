@@ -24,8 +24,9 @@ async function authenticateToken(req, res, next) {
       });
     }
 
-    // Primary lookup: find by Clerk user ID (fast path after webhook sync)
-    let localUser = await prisma.user.findFirst({
+    // Lookup local user by Clerk user ID.
+    // The webhook (/api/webhooks/clerk) guarantees this record exists and is linked.
+    const dbUser = await prisma.user.findFirst({
       where: { clerkUserId: auth.userId },
       select: {
         id: true,
@@ -39,79 +40,40 @@ async function authenticateToken(req, res, next) {
       },
     });
 
-    // Email fallback: staff pre-registered by admin but hasn't signed in yet
-    // (webhook won't have fired for them yet)
-    if (!localUser) {
-      // We need the email for the fallback — get it from Clerk session claims
-      // Clerk embeds email in the token as a session claim if configured,
-      // otherwise we rely on the webhook having already fired.
-      // For robustness, we look at auth.sessionClaims for email.
-      const email =
-        auth.sessionClaims?.email ||
-        (auth.sessionClaims?.primary_email_address_id ? undefined : undefined);
-
-      if (email) {
-        localUser = await prisma.user.findFirst({
-          where: { email },
-          select: {
-            id: true,
-            username: true,
-            fullName: true,
-            shopId: true,
-            shopName: true,
-            role: true,
-            clerkUserId: true,
-            email: true,
-          },
-        });
-      }
-    }
-
-    if (!localUser) {
+    if (!dbUser) {
+      // If the user is not found, it means the webhook hasn't processed yet or failed.
+      // We return 403 USER_NOT_FOUND, allowing the client to poll or show a waiting state.
       return res.status(403).json({
         error:
-          "Account not found. Please create a shop or contact your admin for access.",
+          "Account not found or sync in progress. Please wait a moment or contact your admin.",
         code: "USER_NOT_FOUND",
-        needsShop: true,
+        needsShop: false,
       });
     }
 
-    // Link Clerk ID if this is the staff member's first login
-    if (!localUser.clerkUserId) {
-      console.log(
-        `🔗 Linking Clerk account to existing user: ${localUser.email}`,
-      );
-      try {
-        await prisma.user.update({
-          where: { id: localUser.id },
-          data: { clerkUserId: auth.userId },
-        });
-        localUser.clerkUserId = auth.userId;
-      } catch (linkError) {
-        console.error("Failed to link Clerk account:", linkError);
-        return res.status(500).json({
-          error: "Failed to link account. Please contact support.",
-          code: "LINK_FAILED",
+    // Check if user has a shop assigned
+    if (!dbUser.shopId) {
+      // Allow passing through to create a shop if they are calling POST /api/shops
+      if (req.method === "POST" && req.originalUrl === "/api/shops") {
+        // Let them pass
+      } else {
+        return res.status(403).json({
+          error: "No shop assigned. Please create a shop.",
+          code: "NO_SHOP",
+          needsShop: true,
         });
       }
     }
 
-    if (!localUser.shopId) {
-      return res.status(403).json({
-        error: "No shop assigned. Please create a shop or contact your admin.",
-        code: "NO_SHOP",
-        needsShop: true,
-      });
-    }
-
+    // Attach user to request
     req.user = {
-      id: localUser.id,
-      username: localUser.username,
-      full_name: localUser.fullName,
-      shop_id: localUser.shopId,
-      shop_name: localUser.shopName,
-      role: localUser.role,
-      email: localUser.email,
+      id: dbUser.id,
+      username: dbUser.username,
+      full_name: dbUser.fullName,
+      shop_id: dbUser.shopId,
+      shop_name: dbUser.shopName,
+      role: dbUser.role,
+      email: dbUser.email,
     };
 
     next();

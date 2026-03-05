@@ -99,30 +99,39 @@ async function seed() {
   console.log("🌱 Starting ThingiraPOS seed...\n");
 
   try {
-    const existingShop = await prisma.shop.findFirst({
+    let shop = await prisma.shop.findFirst({
       where: { name: SHOP_NAME },
     });
-    if (existingShop) {
-      console.log(`⚠️  Shop '${SHOP_NAME}' already exists — skipping.\n`);
-      return;
+
+    if (!shop) {
+      console.log("🏪 Creating shop...");
+      shop = await prisma.shop.create({
+        data: {
+          name: SHOP_NAME,
+          address: "Nyeri, Kenya",
+          phone: "0722000111",
+        },
+      });
+      console.log(`   ${shop.name} (${shop.id})\n`);
+    } else {
+      console.log(`🏪 Using existing shop: ${shop.name} (${shop.id})\n`);
     }
 
-    // 1. Create shop
-    console.log("🏪 Creating shop...");
-    const shop = await prisma.shop.create({
-      data: {
-        name: SHOP_NAME,
-        address: "Nyeri, Kenya",
-        phone: "0722000111",
-      },
-    });
-    console.log(`   ${shop.name} (${shop.id})\n`);
-
-    // 2. Create users (no password — Clerk owns auth, webhook links clerkUserId on first sign-in)
-    console.log("👤 Creating users...");
+    // 2. Sync users
+    console.log("👤 Syncing users...");
     for (const u of USERS) {
-      await prisma.user.create({
-        data: {
+      // Using upsert on username which is @unique
+      await prisma.user.upsert({
+        where: { username: u.username },
+        update: {
+          email: u.email,
+          fullName: u.fullName,
+          phone: u.phone,
+          role: u.role,
+          shopId: shop.id,
+          shopName: shop.name,
+        },
+        create: {
           ...u,
           shopId: shop.id,
           shopName: shop.name,
@@ -133,32 +142,45 @@ async function seed() {
     }
     console.log("");
 
-    // 3. Create suppliers
-    console.log("🏭 Creating suppliers...");
+    // 3. Sync suppliers
+    console.log("🏭 Syncing suppliers...");
     for (const s of SUPPLIERS) {
-      await prisma.supplier.create({ data: { ...s, shopId: shop.id } });
+      const existing = await prisma.supplier.findFirst({
+        where: { name: s.name, shopId: shop.id },
+      });
+      if (!existing) {
+        await prisma.supplier.create({ data: { ...s, shopId: shop.id } });
+      }
     }
-    console.log(`   ${SUPPLIERS.length} suppliers\n`);
+    console.log(`   Suppliers synced\n`);
 
-    // 4. Create items
-    console.log("📦 Creating items...");
+    // 4. Sync items
+    console.log("📦 Syncing items...");
     for (const item of ITEMS) {
-      await prisma.item.create({ data: { ...item, shopId: shop.id } });
+      const existing = await prisma.item.findFirst({
+        where: { name: item.name, shopId: shop.id },
+      });
+      if (!existing) {
+        await prisma.item.create({ data: { ...item, shopId: shop.id } });
+      }
     }
-    console.log(`   ${ITEMS.length} items\n`);
+    console.log(`   Items synced\n`);
 
-    // 5. Create customers
-    console.log("👥 Creating customers...");
+    // 5. Sync customers
+    console.log("👥 Syncing customers...");
     for (const c of CUSTOMERS) {
-      await prisma.customer.create({ data: { ...c, shopId: shop.id } });
+      const existing = await prisma.customer.findFirst({
+        where: { name: c.name, shopId: shop.id },
+      });
+      if (!existing) {
+        await prisma.customer.create({ data: { ...c, shopId: shop.id } });
+      }
     }
-    console.log(`   ${CUSTOMERS.length} customers\n`);
+    console.log(`   Customers synced\n`);
 
     console.log("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
-    console.log("✅ Seed complete!");
+    console.log("✅ Seed successful!");
     console.log("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
-    console.log("📋 Next: sign up via Clerk with one of the seeded emails");
-    console.log("   The webhook will link your Clerk account automatically.\n");
   } catch (err) {
     console.error("❌ Seed error:", err);
     process.exit(1);
