@@ -5,6 +5,87 @@ const prisma = require("../prisma/client");
 const router = express.Router();
 
 /**
+ * GET /api/webhooks/health
+ * Health check endpoint to verify webhook configuration
+ */
+router.get("/health", async (req, res) => {
+  const secret = process.env.CLERK_WEBHOOK_SECRET;
+  const databaseUrl = process.env.DATABASE_URL ? "configured" : "missing";
+  
+  // Test database connection
+  let dbStatus = "unknown";
+  try {
+    await prisma.$queryRaw`SELECT 1`;
+    dbStatus = "connected";
+  } catch (err) {
+    dbStatus = "error: " + err.message;
+  }
+  
+  res.json({
+    status: "ok",
+    webhookSecret: secret ? "configured" : "missing",
+    databaseUrl,
+    dbStatus,
+    timestamp: new Date().toISOString(),
+  });
+});
+
+/**
+ * POST /api/webhooks/test
+ * Test endpoint to simulate a webhook event (for testing only)
+ * Requires admin authorization
+ */
+router.post("/test", express.json(), async (req, res) => {
+  // Only allow in development or with a test key
+  const testKey = req.headers["x-test-key"];
+  if (process.env.NODE_ENV === "production" && testKey !== process.env.WEBHOOK_TEST_KEY) {
+    return res.status(403).json({ error: "Not authorized" });
+  }
+  
+  const { email, clerkUserId, firstName, lastName } = req.body;
+  
+  if (!email || !clerkUserId) {
+    return res.status(400).json({ error: "email and clerkUserId required" });
+  }
+  
+  try {
+    const fullName = `${firstName || ""} ${lastName || ""}`.trim() || email.split("@")[0];
+    const username = email.split("@")[0];
+    
+    // Check if user exists
+    const existingUser = await prisma.user.findFirst({
+      where: {
+        OR: [{ clerkUserId }, { email }],
+      },
+    });
+    
+    if (existingUser) {
+      const updated = await prisma.user.update({
+        where: { id: existingUser.id },
+        data: { clerkUserId, fullName },
+      });
+      return res.json({ message: "User updated", user: updated });
+    }
+    
+    // Create new user
+    const newUser = await prisma.user.create({
+      data: {
+        clerkUserId,
+        email,
+        fullName,
+        username,
+        role: "staff",
+      },
+    });
+    
+    res.json({ message: "User created", user: newUser });
+  } catch (err) {
+    console.error("[Webhook Test] Error:", err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+/**
  * POST /api/webhooks/clerk
  * Receives Clerk webhook events and syncs user data to the local database.
  * This route must receive the RAW body (not parsed JSON) for signature verification.
