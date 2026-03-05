@@ -1,346 +1,110 @@
 #!/usr/bin/env node
+
 /**
- * API Endpoint Test Script
- * Run with: node test-api.js <CLERK_JWT_TOKEN>
- * 
- * To get a Clerk JWT token:
- * 1. Log in to the app
- * 2. Open browser console
- * 3. Run: await window.Clerk.session.getToken()
- * 4. Copy the token and run: node test-api.js <token>
+ * API Testing Script for ThingiraPOS
+ * Usage: node test-api.js <token>
  */
 
-const BASE_URL = process.env.API_URL || "https://thingira-pos.vercel.app/api";
+const BASE_URL = 'https://thingira-pos.vercel.app/api';
+const token = process.argv[2];
 
-// Test configuration
-const tests = {
-  // Health check (no auth required)
-  health: {
-    method: "GET",
-    url: "/webhooks/health",
-    auth: false,
-  },
+if (!token) {
+  console.error('❌ Please provide a token: node test-api.js <token>');
+  process.exit(1);
+}
 
-  // Auth endpoints
-  auth: {
-    me: {
-      method: "GET",
-      url: "/auth/me",
-      auth: true,
-    },
-  },
+console.log('🧪 Testing API Endpoints at', BASE_URL);
+console.log('\nToken (first 50 chars):', token.substring(0, 50) + '...');
+console.log('Token length:', token.length);
 
-  // Shop endpoints
-  shops: {
-    check: {
-      method: "GET",
-      url: "/shops/check",
-      auth: true,
-    },
-    create: {
-      method: "POST",
-      url: "/shops",
-      auth: true,
-      payload: {
-        name: "Test Shop",
-        address: "123 Test St",
-        phone: "+254700000000",
-        email: "test@shop.com",
-      },
-    },
-  },
+const endpoints = [
+  { method: 'GET', path: '/health', name: 'health' },
+  { method: 'GET', path: '/auth/me', name: 'auth.me' },
+  { method: 'GET', path: '/shops/check', name: 'shops.check' },
+  { method: 'POST', path: '/shops', name: 'shops.create', body: { name: 'Test Shop', location: 'Test' } },
+  { method: 'GET', path: '/dashboard/summary', name: 'dashboard.summary' },
+  { method: 'GET', path: '/dashboard/hourly-sales', name: 'dashboard.hourlySales' },
+  { method: 'GET', path: '/dashboard/top-items', name: 'dashboard.topItems' },
+  { method: 'GET', path: '/items', name: 'items.list' },
+  { method: 'POST', path: '/items', name: 'items.create', body: { name: 'Test', category: 'Test', unitPrice: 100, stock: 10 } },
+  { method: 'GET', path: '/suppliers', name: 'suppliers.list' },
+  { method: 'POST', path: '/suppliers', name: 'suppliers.create', body: { name: 'Test', phone: '1234567890' } },
+  { method: 'GET', path: '/customers', name: 'customers.list' },
+  { method: 'POST', path: '/customers', name: 'customers.create', body: { name: 'Test', phone: '1234567890' } },
+  { method: 'GET', path: '/sales', name: 'sales.list' },
+  { method: 'POST', path: '/sales', name: 'sales.create', body: { items: [], total: 0, paymentMethod: 'cash' } },
+  { method: 'GET', path: '/staff', name: 'staff.list' },
+  { method: 'POST', path: '/staff', name: 'staff.create', body: { name: 'Test', email: 'test@test.com', role: 'staff' } },
+  { method: 'GET', path: '/stock/movements', name: 'stock.movements' },
+  { method: 'POST', path: '/stock/add', name: 'stock.add', body: { itemId: 1, quantity: 10, reason: 'test' } },
+  { method: 'GET', path: '/reports/daily', name: 'reports.daily' },
+  { method: 'GET', path: '/reports/inventory', name: 'reports.inventory' },
+  { method: 'GET', path: '/shifts/active', name: 'shifts.active' },
+  { method: 'POST', path: '/shifts/start', name: 'shifts.start', body: { openingCash: 1000 } },
+];
 
-  // Dashboard
-  dashboard: {
-    summary: {
-      method: "GET",
-      url: "/dashboard/summary",
-      auth: true,
-    },
-    hourlySales: {
-      method: "GET",
-      url: "/dashboard/hourly-sales",
-      auth: true,
-    },
-    topItems: {
-      method: "GET",
-      url: "/dashboard/top-items",
-      auth: true,
-    },
-  },
-
-  // Items
-  items: {
-    list: {
-      method: "GET",
-      url: "/items",
-      auth: true,
-    },
-    create: {
-      method: "POST",
-      url: "/items",
-      auth: true,
-      payload: {
-        name: "Test Item",
-        buyingPrice: 100,
-        sellingPrice: 150,
-        quantity: 10,
-        minStockLevel: 5,
-        category: "Test",
-      },
-    },
-  },
-
-  // Suppliers
-  suppliers: {
-    list: {
-      method: "GET",
-      url: "/suppliers",
-      auth: true,
-    },
-    create: {
-      method: "POST",
-      url: "/suppliers",
-      auth: true,
-      payload: {
-        name: "Test Supplier",
-        phone: "+254700000001",
-        email: "supplier@test.com",
-      },
-    },
-  },
-
-  // Customers
-  customers: {
-    list: {
-      method: "GET",
-      url: "/customers",
-      auth: true,
-    },
-    create: {
-      method: "POST",
-      url: "/customers",
-      auth: true,
-      payload: {
-        name: "Test Customer",
-        phone: "+254700000002",
-        email: "customer@test.com",
-      },
-    },
-  },
-
-  // Sales
-  sales: {
-    list: {
-      method: "GET",
-      url: "/sales",
-      auth: true,
-    },
-    create: {
-      method: "POST",
-      url: "/sales",
-      auth: true,
-      payload: {
-        paymentType: "cash",
-        totalAmount: 500,
-        items: [
-          {
-            itemId: "test-item-id",
-            quantity: 2,
-            unitPrice: 250,
-            total: 500,
-          },
-        ],
-      },
-    },
-  },
-
-  // Staff
-  staff: {
-    list: {
-      method: "GET",
-      url: "/staff",
-      auth: true,
-    },
-    create: {
-      method: "POST",
-      url: "/staff",
-      auth: true,
-      payload: {
-        fullName: "Test Staff",
-        username: "teststaff",
-        email: "staff@test.com",
-        phone: "+254700000003",
-        role: "staff",
-      },
-    },
-  },
-
-  // Stock
-  stock: {
-    movements: {
-      method: "GET",
-      url: "/stock/movements",
-      auth: true,
-    },
-    add: {
-      method: "POST",
-      url: "/stock/add",
-      auth: true,
-      payload: {
-        itemId: "test-item-id",
-        quantity: 10,
-        type: "in",
-        notes: "Test stock addition",
-      },
-    },
-  },
-
-  // Reports
-  reports: {
-    daily: {
-      method: "GET",
-      url: "/reports/daily",
-      auth: true,
-    },
-    inventory: {
-      method: "GET",
-      url: "/reports/inventory",
-      auth: true,
-    },
-  },
-
-  // Shifts
-  shifts: {
-    active: {
-      method: "GET",
-      url: "/shifts/active",
-      auth: true,
-    },
-    start: {
-      method: "POST",
-      url: "/shifts/start",
-      auth: true,
-      payload: {
-        openingCash: 1000,
-      },
-    },
-  },
-};
-
-async function makeRequest(method, url, token, payload = null) {
+async function testEndpoint(endpoint) {
+  const url = `${BASE_URL}${endpoint.path}`;
   const headers = {
-    "Content-Type": "application/json",
+    'Authorization': `Bearer ${token}`,
+    'Content-Type': 'application/json',
   };
-
-  if (token) {
-    headers["Authorization"] = `Bearer ${token}`;
-  }
-
-  const options = {
-    method,
-    headers,
-  };
-
-  if (payload) {
-    options.body = JSON.stringify(payload);
-  }
-
+  
+  // Debug: Show what we're sending
+  console.log(`\n📡 Testing: ${endpoint.name}`);
+  console.log(`   URL: ${url}`);
+  console.log(`   Method: ${endpoint.method}`);
+  console.log(`   Headers:`, JSON.stringify(headers, null, 2));
+  
   try {
-    const response = await fetch(`${BASE_URL}${url}`, options);
-    const status = response.status;
-    const ok = response.ok;
+    const response = await fetch(url, {
+      method: endpoint.method,
+      headers,
+      body: endpoint.body ? JSON.stringify(endpoint.body) : undefined,
+    });
 
-    let data;
-    const contentType = response.headers.get("content-type");
-    if (contentType && contentType.includes("application/json")) {
-      data = await response.json();
+    const data = await response.json().catch(() => null);
+    
+    if (response.ok) {
+      console.log(`   ✅ ${response.status} - ${endpoint.name}`);
+      if (data && endpoint.name === 'auth.me') {
+        console.log('   Response:', JSON.stringify(data, null, 2));
+      }
+      return true;
     } else {
-      data = await response.text();
+      console.log(`   ❌ ${response.status} - ${endpoint.name}`);
+      console.log('   Error:', data?.error || data?.message || 'Unknown error');
+      return false;
     }
-
-    return { status, ok, data };
   } catch (error) {
-    return { status: 0, ok: false, error: error.message };
+    console.log(`   💥 ERROR - ${endpoint.name}`);
+    console.log('   Error:', error.message);
+    return false;
   }
 }
 
-function flattenTests(tests, prefix = "") {
-  const results = [];
-
-  for (const [key, value] of Object.entries(tests)) {
-    const name = prefix ? `${prefix}.${key}` : key;
-
-    if (value.url) {
-      // This is a test case
-      results.push({ name, ...value });
-    } else {
-      // This is a nested object
-      results.push(...flattenTests(value, name));
-    }
-  }
-
-  return results;
-}
-
-async function runTests(token) {
-  const allTests = flattenTests(tests);
+async function run() {
+  console.log('\n' + '='.repeat(60));
+  
   let passed = 0;
   let failed = 0;
-
-  console.log(`\n🧪 Testing API Endpoints at ${BASE_URL}\n`);
-  console.log("=".repeat(60));
-
-  for (const test of allTests) {
-    process.stdout.write(`${test.name.padEnd(30)} ... `);
-
-    const result = await makeRequest(
-      test.method,
-      test.url,
-      test.auth ? token : null,
-      test.payload
-    );
-
-    if (result.ok) {
-      console.log(`✅ ${result.status}`);
-      passed++;
-    } else {
-      console.log(`❌ ${result.status}`);
-      if (result.error) {
-        console.log(`   Error: ${result.error}`);
-      } else if (result.data && result.data.error) {
-        console.log(`   Error: ${result.data.error}`);
-      }
-      failed++;
-    }
+  
+  for (const endpoint of endpoints) {
+    const ok = await testEndpoint(endpoint);
+    if (ok) passed++;
+    else failed++;
+    
+    // Small delay between requests
+    await new Promise(r => setTimeout(r, 100));
   }
-
-  console.log("=".repeat(60));
-  console.log(`\n📊 Results: ${passed} passed, ${failed} failed\n`);
-
-  return failed === 0;
+  
+  console.log('\n' + '='.repeat(60));
+  console.log(`\n📊 Results: ${passed} passed, ${failed} failed`);
+  
+  if (failed > 0) {
+    console.log('\n💡 Check Vercel logs for debug output from the auth middleware');
+    console.log('   Run: vercel logs thingira-pos --json | grep "[AUTH_DEBUG]"');
+  }
 }
 
-// Main
-async function main() {
-  const token = process.argv[2];
-
-  if (!token) {
-    console.log("\n❌ Please provide a Clerk JWT token\n");
-    console.log("Usage: node test-api.js <CLERK_JWT_TOKEN>\n");
-    console.log("To get a token:");
-    console.log("1. Log in to the app at https://thingira-web.vercel.app");
-    console.log("2. Open browser console (F12)");
-    console.log("3. Run: await window.Clerk.session.getToken()");
-    console.log("4. Copy the token and run this script\n");
-    process.exit(1);
-  }
-
-  const success = await runTests(token);
-  process.exit(success ? 0 : 1);
-}
-
-main().catch((err) => {
-  console.error("Fatal error:", err);
-  process.exit(1);
-});
+run().catch(console.error);
