@@ -53,16 +53,9 @@ router.get("/summary", async (req, res) => {
       },
     );
 
-    const lowStockItems = await prisma.item.findMany({
-      where: { shopId, quantity: { lte: prisma.item.minStockLevel } }, // This is a bit tricky since minStockLevel is a column.
-      // Actually, Prisma doesn't support column-to-column comparison in 'where' easily without raw or a lot of items.
-      // But usually we can fetch and filter if it's small, or use raw.
-    });
-
-    // Correct way for column comparison in Prisma currently is often $queryRaw if we want it DB-side.
-    // Let's use raw for this specific one to be efficient.
+    // Use raw query for column-to-column comparison (quantity <= min_stock_level)
     const lowStock =
-      await prisma.$queryRaw`SELECT id, name, quantity, "minStockLevel", "sellingPrice" as selling_price FROM items WHERE quantity <= "minStockLevel" AND "shopId" = ${shopId} ORDER BY quantity ASC`;
+      await prisma.$queryRaw`SELECT id, name, quantity, min_stock_level as "minStockLevel", selling_price as "sellingPrice" FROM items WHERE quantity <= min_stock_level AND shop_id = ${shopId} ORDER BY quantity ASC`;
 
     res.json({
       ...summary,
