@@ -31,6 +31,35 @@ router.get("/health", async (req, res) => {
 });
 
 /**
+ * GET /api/webhooks/debug
+ * Debug endpoint to check Clerk configuration (no auth required)
+ */
+router.get("/debug", async (req, res) => {
+  const publishableKey = process.env.CLERK_PUBLISHABLE_KEY;
+  const secretKey = process.env.CLERK_SECRET_KEY;
+  const webhookSecret = process.env.CLERK_WEBHOOK_SECRET;
+  
+  res.json({
+    clerkPublishableKey: publishableKey ? {
+      present: true,
+      prefix: publishableKey.substring(0, 20) + "...",
+      length: publishableKey.length
+    } : { present: false },
+    clerkSecretKey: secretKey ? {
+      present: true,
+      prefix: secretKey.substring(0, 10) + "...",
+      length: secretKey.length
+    } : { present: false },
+    clerkWebhookSecret: webhookSecret ? {
+      present: true,
+      prefix: webhookSecret.substring(0, 10) + "...",
+    } : { present: false },
+    nodeEnv: process.env.NODE_ENV,
+    timestamp: new Date().toISOString(),
+  });
+});
+
+/**
  * POST /api/webhooks/test
  * Test endpoint to simulate a webhook event (for testing only)
  * Requires admin authorization
