@@ -181,7 +181,7 @@ router.get("/credit", async (req, res) => {
     });
 
     const totalOutstanding = outstandingEntries.reduce(
-      (sum, entry) => sum + parseFloat(entry.balance),
+      (sum, entry) => sum + parseFloat(entry.balance || 0),
       0,
     );
 
@@ -197,21 +197,21 @@ router.get("/credit", async (req, res) => {
         id: c.id,
         name: c.name,
         phone: c.phone,
-        total_credit: parseFloat(c.totalCredit),
+        total_credit: parseFloat(c.totalCredit || 0),
         entries: c._count.creditLedgers,
       })),
       total_outstanding: totalOutstanding,
       ledger: outstandingEntries.map((l) => ({
         ...l,
         receipt_number: l.sale?.receiptNumber || "N/A",
-        balance: parseFloat(l.balance),
-        amount: parseFloat(l.amount),
-        paid_amount: parseFloat(l.paidAmount),
+        balance: parseFloat(l.balance || 0),
+        amount: parseFloat(l.amount || 0),
+        paid_amount: parseFloat(l.paidAmount || 0),
       })),
       recent_payments: payments.map((p) => ({
         ...p,
         customer_name: p.customer?.name || "Unknown",
-        amount: parseFloat(p.amount),
+        amount: parseFloat(p.amount || 0),
       })),
     });
   } catch (err) {
