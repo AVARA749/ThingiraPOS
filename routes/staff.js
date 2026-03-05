@@ -1,5 +1,6 @@
 const express = require("express");
 const prisma = require("../prisma/client");
+const { clerkClient } = require("@clerk/express");
 const { authenticateToken, requireAdmin } = require("../middleware/auth");
 
 const router = express.Router();
@@ -16,7 +17,7 @@ router.get("/", authenticateToken, async (req, res) => {
 
     // Build query - users can only see staff from their own shop
     const where = { shopId: shop_id };
-    
+
     // Staff can only see themselves, admin sees all
     if (role !== "admin") {
       where.id = userId;
@@ -37,16 +38,15 @@ router.get("/", authenticateToken, async (req, res) => {
         createdAt: true,
         updatedAt: true,
       },
-      orderBy: { createdAt: "desc" }
+      orderBy: { createdAt: "desc" },
     });
 
     res.json(staff);
-
   } catch (error) {
     console.error("Get staff error:", error);
     res.status(500).json({
       error: "Failed to retrieve staff members.",
-      code: "SERVER_ERROR"
+      code: "SERVER_ERROR",
     });
   }
 });
@@ -71,7 +71,7 @@ router.post("/", authenticateToken, requireAdmin, async (req, res) => {
       return res.status(400).json({
         error: "Username is required.",
         code: "VALIDATION_ERROR",
-        field: "username"
+        field: "username",
       });
     }
 
@@ -79,7 +79,7 @@ router.post("/", authenticateToken, requireAdmin, async (req, res) => {
       return res.status(400).json({
         error: "Valid email is required.",
         code: "VALIDATION_ERROR",
-        field: "email"
+        field: "email",
       });
     }
 
@@ -87,7 +87,7 @@ router.post("/", authenticateToken, requireAdmin, async (req, res) => {
       return res.status(400).json({
         error: "Full name is required.",
         code: "VALIDATION_ERROR",
-        field: "fullName"
+        field: "fullName",
       });
     }
 
@@ -115,48 +115,69 @@ router.post("/", authenticateToken, requireAdmin, async (req, res) => {
         shopName: true,
         clerkUserId: true,
         createdAt: true,
-      }
+      },
     });
+
+    // Send Clerk invitation email so the staff member can sign in
+    let inviteSent = false;
+    try {
+      await clerkClient.invitations.createInvitation({
+        emailAddress: email,
+        redirectUrl:
+          process.env.CLIENT_ORIGIN?.split(",")[0]?.trim() ||
+          "http://localhost:5173",
+      });
+      inviteSent = true;
+      console.log(`\u2709\ufe0f  Clerk invitation sent to ${email}`);
+    } catch (inviteErr) {
+      // Non-fatal: staff exists in DB. Likely email already has a Clerk account
+      console.warn(
+        `Could not send Clerk invite to ${email}:`,
+        inviteErr?.errors?.[0]?.message || inviteErr?.message,
+      );
+    }
 
     res.status(201).json({
-      message: "Staff member created successfully. They can now sign in using their email.",
+      message:
+        inviteSent ?
+          `Staff member created. An invitation email has been sent to ${email}.`
+        : `Staff member created. Ask ${fullName} to sign in with ${email} (account may already exist).`,
       staff,
-      instructions: `Tell ${fullName} to sign in with email: ${email}`
+      inviteSent,
     });
-
   } catch (error) {
     console.error("Create staff error:", error);
 
     // Handle unique constraint violations
     if (error.code === "P2002") {
       const field = error.meta?.target?.[0];
-      
+
       if (field === "email") {
         return res.status(409).json({
           error: "A user with this email already exists.",
           code: "EMAIL_EXISTS",
-          field: "email"
+          field: "email",
         });
       }
-      
+
       if (field === "username") {
         return res.status(409).json({
           error: "This username is already taken.",
           code: "USERNAME_EXISTS",
-          field: "username"
+          field: "username",
         });
       }
 
       return res.status(409).json({
         error: "Duplicate entry detected.",
         code: "DUPLICATE_ENTRY",
-        field
+        field,
       });
     }
 
     res.status(500).json({
       error: "Failed to create staff member. Please try again.",
-      code: "SERVER_ERROR"
+      code: "SERVER_ERROR",
     });
   }
 });
@@ -174,7 +195,7 @@ router.get("/:id", authenticateToken, async (req, res) => {
     if (role !== "admin" && parseInt(id) !== userId) {
       return res.status(403).json({
         error: "Access denied. You can only view your own profile.",
-        code: "ACCESS_DENIED"
+        code: "ACCESS_DENIED",
       });
     }
 
@@ -195,23 +216,22 @@ router.get("/:id", authenticateToken, async (req, res) => {
         clerkUserId: true,
         createdAt: true,
         updatedAt: true,
-      }
+      },
     });
 
     if (!staff) {
       return res.status(404).json({
         error: "Staff member not found.",
-        code: "STAFF_NOT_FOUND"
+        code: "STAFF_NOT_FOUND",
       });
     }
 
     res.json(staff);
-
   } catch (error) {
     console.error("Get staff member error:", error);
     res.status(500).json({
       error: "Failed to retrieve staff member.",
-      code: "SERVER_ERROR"
+      code: "SERVER_ERROR",
     });
   }
 });
@@ -232,7 +252,7 @@ router.patch("/:id", authenticateToken, requireAdmin, async (req, res) => {
       return res.status(400).json({
         error: "Invalid role. Must be 'admin' or 'staff'.",
         code: "VALIDATION_ERROR",
-        field: "role"
+        field: "role",
       });
     }
 
@@ -253,7 +273,7 @@ router.patch("/:id", authenticateToken, requireAdmin, async (req, res) => {
     if (staff.count === 0) {
       return res.status(404).json({
         error: "Staff member not found.",
-        code: "STAFF_NOT_FOUND"
+        code: "STAFF_NOT_FOUND",
       });
     }
 
@@ -271,19 +291,18 @@ router.patch("/:id", authenticateToken, requireAdmin, async (req, res) => {
         shopName: true,
         clerkUserId: true,
         updatedAt: true,
-      }
+      },
     });
 
     res.json({
       message: "Staff member updated successfully.",
-      staff: updatedStaff
+      staff: updatedStaff,
     });
-
   } catch (error) {
     console.error("Update staff error:", error);
     res.status(500).json({
       error: "Failed to update staff member.",
-      code: "SERVER_ERROR"
+      code: "SERVER_ERROR",
     });
   }
 });
@@ -304,7 +323,7 @@ router.delete("/:id", authenticateToken, requireAdmin, async (req, res) => {
     if (staffId === userId) {
       return res.status(400).json({
         error: "You cannot delete your own account.",
-        code: "SELF_DELETE_NOT_ALLOWED"
+        code: "SELF_DELETE_NOT_ALLOWED",
       });
     }
 
@@ -318,19 +337,18 @@ router.delete("/:id", authenticateToken, requireAdmin, async (req, res) => {
     if (result.count === 0) {
       return res.status(404).json({
         error: "Staff member not found.",
-        code: "STAFF_NOT_FOUND"
+        code: "STAFF_NOT_FOUND",
       });
     }
 
     res.json({
-      message: "Staff member removed successfully."
+      message: "Staff member removed successfully.",
     });
-
   } catch (error) {
     console.error("Delete staff error:", error);
     res.status(500).json({
       error: "Failed to remove staff member.",
-      code: "SERVER_ERROR"
+      code: "SERVER_ERROR",
     });
   }
 });
