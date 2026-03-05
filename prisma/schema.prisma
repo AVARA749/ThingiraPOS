@@ -15,20 +15,27 @@ model Shop {
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @default(now()) @updatedAt @map("updated_at")
 
-  users          User[]
-  suppliers      Supplier[]
-  items          Item[]
-  purchases      Purchase[]
-  customers      Customer[]
-  sales          Sale[]
-  saleItems      SaleItem[]
-  stockMovements StockMovement[]
-  creditLedgers  CreditLedger[]
-  creditPayments CreditPayment[]
-  generalLedgers GeneralLedger[]
-  shiftRegisters ShiftRegister[]
+  users             User[]
+  suppliers         Supplier[]
+  items             Item[]
+  purchases         Purchase[]
+  customers         Customer[]
+  sales             Sale[]
+  saleItems         SaleItem[]
+  stockMovements    StockMovement[]
+  creditLedgers    CreditLedger[]
+  creditPayments   CreditPayment[]
+  generalLedgers    GeneralLedger[]
+  shiftRegisters   ShiftRegister[]
+  pumps             Pump[]
+  pettyCashEntries PettyCashEntry[]
 
   @@map("shops")
+}
+
+enum UserRole {
+  admin
+  staff
 }
 
 model User {
@@ -38,7 +45,7 @@ model User {
   fullName    String   @map("full_name")
   shopName    String?  @map("shop_name")
   phone       String?
-  role        String   @default("staff")
+  role        UserRole @default(staff)
   createdAt   DateTime @default(now()) @map("created_at")
   updatedAt   DateTime @default(now()) @updatedAt @map("updated_at")
   shopId      String?  @map("shop_id") @db.Uuid
@@ -114,8 +121,9 @@ model Customer {
   shopId      String?  @map("shop_id") @db.Uuid
   shop        Shop?    @relation(fields: [shopId], references: [id], onDelete: Cascade)
 
-  sales         Sale[]
+  sales          Sale[]
   creditLedgers CreditLedger[]
+  creditPayments CreditPayment[]
 
   @@map("customers")
 }
@@ -194,6 +202,7 @@ model CreditLedger {
   shop         Shop?     @relation(fields: [shopId], references: [id], onDelete: Cascade)
 
   customer Customer @relation(fields: [customerId], references: [id])
+  creditPayments CreditPayment[]
 
   @@map("credit_ledger")
 }
@@ -208,6 +217,9 @@ model CreditPayment {
   createdAt     DateTime @default(now()) @map("created_at")
   shopId        String?  @map("shop_id") @db.Uuid
   shop          Shop?    @relation(fields: [shopId], references: [id], onDelete: Cascade)
+
+  customer     Customer     @relation(fields: [customerId], references: [id])
+  creditLedger CreditLedger @relation(fields: [creditId], references: [id])
 
   @@map("credit_payments")
 }
@@ -227,6 +239,8 @@ model GeneralLedger {
   @@map("general_ledger")
 }
 
+// ============== FUEL STATION MODELS ==============
+
 model ShiftRegister {
   id        String    @id @default(uuid()) @db.Uuid
   userId    String    @map("user_id") @db.Uuid
@@ -240,5 +254,102 @@ model ShiftRegister {
   shopId    String?   @map("shop_id") @db.Uuid
   shop      Shop?     @relation(fields: [shopId], references: [id], onDelete: Cascade)
 
+  // Enhanced fuel station fields
+  notes            String?   @map("notes")
+  expectedCash     Decimal?  @map("expected_cash") @db.Decimal(10, 2)
+  actualCash       Decimal?  @map("actual_cash") @db.Decimal(10, 2)
+  variance         Decimal?  @map("variance") @db.Decimal(10, 2)
+  totalCashSales   Decimal?  @map("total_cash_sales") @db.Decimal(10, 2)
+  totalCardSales   Decimal?  @map("total_card_sales") @db.Decimal(10, 2)
+  totalMpesaSales  Decimal?  @map("total_mpesa_sales") @db.Decimal(10, 2)
+
+  nozzleShiftReadings NozzleShiftReading[]
+  pettyCashEntries   PettyCashEntry[]
+
   @@map("shift_registers")
+}
+
+// Fuel type enum
+enum FuelType {
+  petrol
+  diesel
+  kerosene
+}
+
+// Pump model - represents a fuel pump
+model Pump {
+  id        String   @id @default(uuid()) @db.Uuid
+  name      String
+  pumpNumber Int     @unique
+  isActive  Boolean  @default(true) @map("is_active")
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @default(now()) @updatedAt @map("updated_at")
+  shopId    String?  @map("shop_id") @db.Uuid
+  shop      Shop?    @relation(fields: [shopId], references: [id], onDelete: Cascade)
+
+  nozzles Nozzle[]
+
+  @@map("pumps")
+}
+
+// Nozzle model - each pump has multiple nozzles for different fuel types
+model Nozzle {
+  id        String    @id @default(uuid()) @db.Uuid
+  pumpId    String    @map("pump_id") @db.Uuid
+  pump      Pump      @relation(fields: [pumpId], references: [id], onDelete: Cascade)
+  nozzleNumber Int
+  fuelType  FuelType  @map("fuel_type")
+  unitPrice Decimal   @default(0) @map("unit_price") @db.Decimal(10, 2)
+  isActive  Boolean   @default(true) @map("is_active")
+  createdAt DateTime  @default(now()) @map("created_at")
+  updatedAt DateTime  @default(now()) @updatedAt @map("updated_at")
+
+  nozzleShiftReadings NozzleShiftReading[]
+
+  @@unique([pumpId, nozzleNumber])
+  @@map("nozzles")
+}
+
+// Nozzle shift readings - tracks meter readings at start/end of each shift
+model NozzleShiftReading {
+  id              String    @id @default(uuid()) @db.Uuid
+  shiftId         String    @map("shift_id") @db.Uuid
+  shift           ShiftRegister @relation(fields: [shiftId], references: [id], onDelete: Cascade)
+  nozzleId        String    @map("nozzle_id") @db.Uuid
+  nozzle          Nozzle    @relation(fields: [nozzleId], references: [id], onDelete: Cascade)
+  openingReading  Decimal   @map("opening_reading") @db.Decimal(12, 2)
+  closingReading  Decimal?  @map("closing_reading") @db.Decimal(12, 2)
+  openingTime    DateTime  @map("opening_time")
+  closingTime    DateTime? @map("closing_time")
+  volumeSold     Decimal?   @map("volume_sold") @db.Decimal(12, 2)
+  amountSold     Decimal?   @map("amount_sold") @db.Decimal(12, 2)
+  createdAt      DateTime  @default(now()) @map("created_at")
+  updatedAt      DateTime  @default(now()) @updatedAt @map("updated_at")
+
+  @@unique([shiftId, nozzleId])
+  @@map("nozzle_shift_readings")
+}
+
+// Petty cash categories
+enum PettyCashCategory {
+  office_supplies
+  transport
+  maintenance
+  cleaning
+  other
+}
+
+// Petty cash entries - tracks small expenses during a shift
+model PettyCashEntry {
+  id          String           @id @default(uuid()) @db.Uuid
+  shiftId     String           @map("shift_id") @db.Uuid
+  shift       ShiftRegister    @relation(fields: [shiftId], references: [id], onDelete: Cascade)
+  amount      Decimal          @map("amount") @db.Decimal(10, 2)
+  category    PettyCashCategory @default(other)
+  description String?
+  createdAt   DateTime         @default(now()) @map("created_at")
+  shopId      String?          @map("shop_id") @db.Uuid
+  shop        Shop?            @relation(fields: [shopId], references: [id], onDelete: Cascade)
+
+  @@map("petty_cash_entries")
 }
