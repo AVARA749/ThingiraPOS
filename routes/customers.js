@@ -40,7 +40,7 @@ router.get("/", async (req, res) => {
 router.get("/:id", async (req, res) => {
   try {
     const customer = await prisma.customer.findFirst({
-      where: { id: parseInt(req.params.id), shopId: req.user.shop_id },
+      where: { id: req.params.id, shopId: req.user.shop_id },
     });
     if (!customer)
       return res.status(404).json({ error: "Customer not found." });
@@ -58,7 +58,7 @@ router.get("/:id/ledger", async (req, res) => {
   try {
     const ledger = await prisma.creditLedger.findMany({
       where: {
-        customerId: parseInt(req.params.id),
+        customerId: req.params.id,
         shopId: req.user.shop_id,
       },
       include: {
@@ -85,7 +85,7 @@ router.get("/:id/ledger", async (req, res) => {
 // POST /api/customers/:id/pay - Record credit payment
 router.post("/:id/pay", async (req, res) => {
   const shopId = req.user.shop_id;
-  const customerId = parseInt(req.params.id);
+  const customerId = req.params.id;
 
   try {
     const { amount, ledger_id, payment_date, notes } = req.body;
@@ -107,7 +107,7 @@ router.post("/:id/pay", async (req, res) => {
       if (ledger_id) {
         const entry = await tx.creditLedger.findFirst({
           where: {
-            id: parseInt(ledger_id),
+            id: ledger_id,
             customerId: customerId,
             shopId: shopId,
           },
@@ -163,23 +163,21 @@ router.post("/:id/pay", async (req, res) => {
         data: [
           {
             shopId,
-            accountName: "Cash",
-            accountType: "Asset",
+            date: payDate,
+            description: `Cash - Credit payment from ${customer.name}`,
             debit: amount,
             credit: 0,
-            referenceType: "payment",
-            referenceId: customerId,
-            description: `Credit payment from ${customer.name}`,
+            balance: amount,
+            reference: customerId,
           },
           {
             shopId,
-            accountName: "Accounts Receivable",
-            accountType: "Asset",
+            date: payDate,
+            description: `Accounts Receivable - Credit payment from ${customer.name}`,
             debit: 0,
             credit: amount,
-            referenceType: "payment",
-            referenceId: customerId,
-            description: `Credit payment from ${customer.name}`,
+            balance: 0,
+            reference: customerId,
           },
         ],
       });

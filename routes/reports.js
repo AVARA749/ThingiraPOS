@@ -115,7 +115,7 @@ router.get("/inventory", async (req, res) => {
       ([, a], [, b]) => b - a,
     );
 
-    const fastIds = sortedMovements.slice(0, 10).map(([id]) => parseInt(id));
+    const fastIds = sortedMovements.slice(0, 10).map(([id]) => id);
     const fastItems = await prisma.item.findMany({
       where: { id: { in: fastIds } },
     });
@@ -169,7 +169,7 @@ router.get("/credit", async (req, res) => {
       orderBy: { totalCredit: "desc" },
       include: {
         _count: {
-          select: { creditLedger: { where: { status: { not: "paid" } } } },
+          select: { creditLedgers: { where: { status: { not: "paid" } } } },
         },
       },
     });
@@ -198,7 +198,7 @@ router.get("/credit", async (req, res) => {
         name: c.name,
         phone: c.phone,
         total_credit: parseFloat(c.totalCredit),
-        entries: c._count.creditLedger,
+        entries: c._count.creditLedgers,
       })),
       total_outstanding: totalOutstanding,
       ledger: outstandingEntries.map((l) => ({
@@ -225,55 +225,46 @@ router.get("/financial", async (req, res) => {
   try {
     const shopId = req.user.shop_id;
 
-    const ledgerEntries = await prisma.generalLedger.groupBy({
-      by: ["accountName", "accountType"],
+    // Since GeneralLedger doesn't have accountName and accountType fields in the DB schema,
+    // we generate a basic summary using Sales and Purchases as a proxy for the financial report.
+    const sales = await prisma.sale.aggregate({
+      where: { shopId, status: "completed" },
+      _sum: { totalAmount: true },
+    });
+    const purchases = await prisma.purchase.aggregate({
       where: { shopId },
-      _sum: {
-        debit: true,
-        credit: true,
-      },
+      _sum: { totalCost: true },
     });
 
-    const trialBalance = ledgerEntries.map((b) => {
-      const debits = parseFloat(b._sum.debit || 0);
-      const credits = parseFloat(b._sum.credit || 0);
-      let net = 0;
-      if (["Asset", "Expense"].includes(b.accountType)) {
-        net = debits - credits;
-      } else {
-        net = credits - debits;
-      }
+    const revenue = parseFloat(sales._sum.totalAmount || 0);
+    const expenses = parseFloat(purchases._sum.totalCost || 0);
 
-      return {
-        account_name: b.accountName,
-        account_type: b.accountType,
-        total_debit: debits,
-        total_credit: credits,
-        net_balance: net,
-      };
-    });
-
-    const totals = trialBalance.reduce(
-      (acc, curr) => {
-        if (curr.account_type === "Revenue") acc.revenue += curr.net_balance;
-        if (curr.account_type === "Expense") acc.expenses += curr.net_balance;
-        if (curr.account_type === "Asset") acc.assets += curr.net_balance;
-        if (curr.account_type === "Liability")
-          acc.liabilities += curr.net_balance;
-        return acc;
+    const trialBalance = [
+      {
+        account_name: "Sales Revenue",
+        account_type: "Revenue",
+        total_debit: 0,
+        total_credit: revenue,
+        net_balance: revenue,
       },
-      { revenue: 0, expenses: 0, assets: 0, liabilities: 0 },
-    );
+      {
+        account_name: "Purchases / COGS",
+        account_type: "Expense",
+        total_debit: expenses,
+        total_credit: 0,
+        net_balance: expenses,
+      },
+    ];
 
     res.json({
       trial_balance: trialBalance,
       summary: {
-        total_revenue: totals.revenue,
-        total_expenses: totals.expenses,
-        net_profit: totals.revenue - totals.expenses,
-        total_assets: totals.assets,
-        total_liabilities: totals.liabilities,
-        equity: totals.assets - totals.liabilities,
+        total_revenue: revenue,
+        total_expenses: expenses,
+        net_profit: revenue - expenses,
+        total_assets: 0,
+        total_liabilities: 0,
+        equity: revenue - expenses,
       },
     });
   } catch (err) {

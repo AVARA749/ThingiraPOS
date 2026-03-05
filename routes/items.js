@@ -31,10 +31,6 @@ router.get("/", async (req, res) => {
       where.quantity = {
         lte: prisma.item.min_stock_level,
       };
-      // Note: In Prisma, you can't easily compare two columns (quantity <= min_stock_level) directly in a simple 'where' without using a raw query or a custom query.
-      // But usually min_stock_level is a value. If we want column vs column, we might need some trick or just use the field names if they are static.
-      // Actually, Prisma 4.3.0+ supports extendedWhereUnique but not column-to-column comparisons in findMany easily.
-      // We'll use a pragmatic approach: if low_stock is true, filter them after or use raw.
     }
 
     let items = await prisma.item.findMany({
@@ -85,7 +81,7 @@ router.get("/:id", async (req, res) => {
   try {
     const item = await prisma.item.findFirst({
       where: {
-        id: parseInt(req.params.id),
+        id: req.params.id,
         shopId: req.user.shop_id,
       },
       include: {

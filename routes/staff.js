@@ -98,7 +98,6 @@ router.post("/", authenticateToken, requireAdmin, async (req, res) => {
         email: email.trim().toLowerCase(),
         fullName: fullName.trim(),
         phone: phone?.trim() || null,
-        passwordHash: "CLERK_AUTH", // Will be authenticated via Clerk
         role: "staff",
         shopId: shop_id,
         shopName: shop_name,
@@ -192,7 +191,7 @@ router.get("/:id", authenticateToken, async (req, res) => {
     const { shop_id, role, id: userId } = req.user;
 
     // Staff can only view themselves
-    if (role !== "admin" && parseInt(id) !== userId) {
+    if (role !== "admin" && id !== userId) {
       return res.status(403).json({
         error: "Access denied. You can only view your own profile.",
         code: "ACCESS_DENIED",
@@ -201,7 +200,7 @@ router.get("/:id", authenticateToken, async (req, res) => {
 
     const staff = await prisma.user.findFirst({
       where: {
-        id: parseInt(id),
+        id: id,
         shopId: shop_id, // Can only view staff from same shop
       },
       select: {
@@ -264,7 +263,7 @@ router.patch("/:id", authenticateToken, requireAdmin, async (req, res) => {
 
     const staff = await prisma.user.updateMany({
       where: {
-        id: parseInt(id),
+        id: id,
         shopId: shop_id, // Can only update staff from same shop
       },
       data: updateData,
@@ -279,7 +278,7 @@ router.patch("/:id", authenticateToken, requireAdmin, async (req, res) => {
 
     // Fetch updated staff
     const updatedStaff = await prisma.user.findUnique({
-      where: { id: parseInt(id) },
+      where: { id: id },
       select: {
         id: true,
         username: true,
@@ -317,7 +316,7 @@ router.delete("/:id", authenticateToken, requireAdmin, async (req, res) => {
     const { id } = req.params;
     const { shop_id, id: userId } = req.user;
 
-    const staffId = parseInt(id);
+    const staffId = id;
 
     // Prevent admin from deleting themselves
     if (staffId === userId) {

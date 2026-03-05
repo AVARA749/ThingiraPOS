@@ -5,6 +5,13 @@ const { authenticateToken } = require("../middleware/auth");
 const router = express.Router();
 router.use(authenticateToken);
 
+// Helper to check if string is valid UUID
+function isValidUUID(str) {
+  const uuidRegex =
+    /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+  return uuidRegex.test(str);
+}
+
 // POST /api/purchases - Record stock intake
 router.post("/", async (req, res) => {
   const shopId = req.user.shop_id;
@@ -21,11 +28,42 @@ router.post("/", async (req, res) => {
       return res.status(400).json({ error: "At least one item is required." });
     }
 
+    // Validate supplier: must provide either valid supplier_id OR supplier_name
+    if (
+      (!supplier_id || supplier_id === "walk-in-supplier") &&
+      !supplier_name
+    ) {
+      return res.status(400).json({
+        error:
+          "Supplier is required. Please select an existing supplier or enter a new supplier name.",
+      });
+    }
+
+    // If supplier_id is provided (and not walk-in-supplier), validate it's a UUID
+    if (
+      supplier_id &&
+      supplier_id !== "walk-in-supplier" &&
+      !isValidUUID(supplier_id)
+    ) {
+      return res.status(400).json({
+        error:
+          "Invalid supplier selected. Please choose from existing suppliers.",
+      });
+    }
+
     const results = await prisma.$transaction(async (tx) => {
       let suppId = supplier_id;
+      let supplierInfo = null;
 
       // 1. Handle Supplier logic
-      if (!suppId && supplier_name) {
+      // Case 1: No supplier_id or walk-in-supplier - create/find by name
+      if (!suppId || suppId === "walk-in-supplier") {
+        if (!supplier_name) {
+          throw new Error(
+            "Supplier name is required when no supplier is selected.",
+          );
+        }
+
         let supplier = await tx.supplier.findFirst({
           where: {
             name: { equals: supplier_name, mode: "insensitive" },
@@ -53,13 +91,32 @@ router.post("/", async (req, res) => {
           });
           suppId = newSupplier.id;
         }
+      } else {
+        // Case 2: supplier_id provided - validate it exists in this shop
+        supplierInfo = await tx.supplier.findFirst({
+          where: {
+            id: suppId,
+            shopId: shopId,
+          },
+        });
+
+        if (!supplierInfo) {
+          throw new Error(
+            "Selected supplier not found. Please choose from existing suppliers.",
+          );
+        }
       }
 
-      if (!suppId) throw new Error("Supplier information is required.");
+      // Load supplier info if not already loaded
+      if (!supplierInfo) {
+        supplierInfo = await tx.supplier.findUnique({
+          where: { id: suppId },
+        });
+      }
 
-      const supplierInfo = await tx.supplier.findUnique({
-        where: { id: suppId },
-      });
+      if (!supplierInfo) {
+        throw new Error("Failed to create or find supplier.");
+      }
       const purchaseResults = [];
 
       // 2. Process each item
@@ -161,28 +218,26 @@ router.post("/", async (req, res) => {
           },
         });
 
-        // Accounting entries
+        // Accounting entries - Simplify or remove for now to match schema
         await tx.generalLedger.createMany({
           data: [
             {
               shopId,
-              accountName: "Inventory",
-              accountType: "Asset",
+              date: datePurchased,
+              description: `Inventory Asset - Purchase of ${itemName} from ${supplierInfo.name}`,
               debit: totalCost,
               credit: 0,
-              referenceType: "purchase",
-              referenceId: purchase.id,
-              description: `Purchase of ${itemName} from ${supplierInfo.name}`,
+              balance: totalCost,
+              reference: purchase.id,
             },
             {
               shopId,
-              accountName: "Cash",
-              accountType: "Asset",
+              date: datePurchased,
+              description: `Cash Asset - Purchase of ${itemName} from ${supplierInfo.name}`,
               debit: 0,
               credit: totalCost,
-              referenceType: "purchase",
-              referenceId: purchase.id,
-              description: `Purchase of ${itemName} from ${supplierInfo.name}`,
+              balance: 0,
+              reference: purchase.id,
             },
           ],
         });
@@ -228,7 +283,7 @@ router.get("/", async (req, res) => {
       }
     }
 
-    if (supplier_id) where.supplierId = parseInt(supplier_id);
+    if (supplier_id) where.supplierId = supplier_id;
 
     const purchases = await prisma.purchase.findMany({
       where,

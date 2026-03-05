@@ -175,30 +175,28 @@ router.post("/", async (req, res) => {
           data: [
             {
               shopId,
-              accountName: "Cost of Goods Sold",
-              accountType: "Expense",
+              date: new Date(),
+              description: `Cost of Goods Sold - for ${li.itemName} (Receipt: ${receiptNumber})`,
               debit: cogsAmount,
               credit: 0,
-              referenceType: "sale",
-              referenceId: sale.id,
-              description: `COGS for ${li.itemName} (Receipt: ${receiptNumber})`,
+              balance: cogsAmount,
+              reference: sale.id,
             },
             {
               shopId,
-              accountName: "Inventory",
-              accountType: "Asset",
+              date: new Date(),
+              description: `Inventory - for ${li.itemName} (Receipt: ${receiptNumber})`,
               debit: 0,
               credit: cogsAmount,
-              referenceType: "sale",
-              referenceId: sale.id,
-              description: `COGS for ${li.itemName} (Receipt: ${receiptNumber})`,
+              balance: 0,
+              reference: sale.id,
             },
           ],
         });
       }
 
       // 5. Accounting: Revenue
-      const paymentAccount =
+      const paymentTypeDesc =
         payment_type === "cash" ? "Cash"
         : payment_type === "mpesa" ? "Mpesa"
         : payment_type === "sacco" ? "Sacco"
@@ -208,23 +206,21 @@ router.post("/", async (req, res) => {
         data: [
           {
             shopId,
-            accountName: paymentAccount,
-            accountType: "Asset",
+            date: new Date(),
+            description: `${paymentTypeDesc} - Sale Revenue (Receipt: ${receiptNumber}, Method: ${payment_type})`,
             debit: totalAmount,
             credit: 0,
-            referenceType: "sale",
-            referenceId: sale.id,
-            description: `Sale Revenue (Receipt: ${receiptNumber}, Method: ${payment_type})`,
+            balance: totalAmount,
+            reference: sale.id,
           },
           {
             shopId,
-            accountName: "Sales Revenue",
-            accountType: "Revenue",
+            date: new Date(),
+            description: `Sales Revenue - Sale Revenue (Receipt: ${receiptNumber}, Method: ${payment_type})`,
             debit: 0,
             credit: totalAmount,
-            referenceType: "sale",
-            referenceId: sale.id,
-            description: `Sale Revenue (Receipt: ${receiptNumber}, Method: ${payment_type})`,
+            balance: 0,
+            reference: sale.id,
           },
         ],
       });
@@ -321,7 +317,7 @@ router.get("/:id", async (req, res) => {
   try {
     const shopId = req.user.shop_id;
     const sale = await prisma.sale.findFirst({
-      where: { id: parseInt(req.params.id), shopId: shopId },
+      where: { id: req.params.id, shopId: shopId },
       include: { saleItems: true },
     });
 
@@ -343,7 +339,7 @@ router.get("/:id", async (req, res) => {
 // DELETE /api/sales/:id - Void a sale (restore stock)
 router.delete("/:id", async (req, res) => {
   const shopId = req.user.shop_id;
-  const saleId = parseInt(req.params.id);
+  const saleId = req.params.id;
 
   try {
     await prisma.$transaction(async (tx) => {
@@ -382,30 +378,28 @@ router.delete("/:id", async (req, res) => {
           data: [
             {
               shopId,
-              accountName: "Inventory",
-              accountType: "Asset",
+              date: new Date(),
+              description: `Inventory - Stock Restored from Void (Item: ${si.itemName})`,
               debit: cogsAmount,
               credit: 0,
-              referenceType: "void",
-              referenceId: sale.id,
-              description: `Stock Restored from Void (Item: ${si.itemName})`,
+              balance: cogsAmount,
+              reference: sale.id,
             },
             {
               shopId,
-              accountName: "Cost of Goods Sold",
-              accountType: "Expense",
+              date: new Date(),
+              description: `Cost of Goods Sold - Stock Restored from Void (Item: ${si.itemName})`,
               debit: 0,
               credit: cogsAmount,
-              referenceType: "void",
-              referenceId: sale.id,
-              description: `Stock Restored from Void (Item: ${si.itemName})`,
+              balance: 0,
+              reference: sale.id,
             },
           ],
         });
       }
 
       // 2. Reverse Revenue
-      const paymentAccount =
+      const paymentTypeDesc =
         sale.paymentType === "cash" ? "Cash"
         : sale.paymentType === "mpesa" ? "Mpesa"
         : sale.paymentType === "sacco" ? "Sacco"
@@ -415,23 +409,21 @@ router.delete("/:id", async (req, res) => {
         data: [
           {
             shopId,
-            accountName: "Sales Revenue",
-            accountType: "Revenue",
+            date: new Date(),
+            description: `Sales Revenue - Sale Voided (Receipt: ${sale.receiptNumber})`,
             debit: sale.totalAmount,
             credit: 0,
-            referenceType: "void",
-            referenceId: sale.id,
-            description: `Sale Voided (Receipt: ${sale.receiptNumber})`,
+            balance: sale.totalAmount,
+            reference: sale.id,
           },
           {
             shopId,
-            accountName: paymentAccount,
-            accountType: "Asset",
+            date: new Date(),
+            description: `${paymentTypeDesc} - Sale Voided (Receipt: ${sale.receiptNumber})`,
             debit: 0,
             credit: sale.totalAmount,
-            referenceType: "void",
-            referenceId: sale.id,
-            description: `Sale Voided (Receipt: ${sale.receiptNumber})`,
+            balance: 0,
+            reference: sale.id,
           },
         ],
       });

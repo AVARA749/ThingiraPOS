@@ -35,7 +35,7 @@ router.get("/", async (req, res) => {
 router.get("/:id", async (req, res) => {
   try {
     const supplier = await prisma.supplier.findFirst({
-      where: { id: parseInt(req.params.id), shopId: req.user.shop_id },
+      where: { id: req.params.id, shopId: req.user.shop_id },
     });
     if (!supplier)
       return res.status(404).json({ error: "Supplier not found." });
@@ -51,7 +51,7 @@ router.get("/:id/purchases", async (req, res) => {
     const shopId = req.user.shop_id;
     const purchases = await prisma.purchase.findMany({
       where: {
-        supplierId: parseInt(req.params.id),
+        supplierId: req.params.id,
         shopId: shopId,
       },
       orderBy: { datePurchased: "desc" },
@@ -111,7 +111,7 @@ router.put("/:id", async (req, res) => {
   try {
     const { name, address, phone, email } = req.body;
     const shopId = req.user.shop_id;
-    const supplierId = parseInt(req.params.id);
+    const supplierId = req.params.id;
 
     const supplier = await prisma.supplier.update({
       where: { id: supplierId }, // Technically should check shopId too
