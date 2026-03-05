@@ -32,19 +32,18 @@ model Shop {
 }
 
 model User {
-  id           Int      @id @default(autoincrement())
-  username     String   @unique
-  email        String?  @unique
-  passwordHash String   @map("password_hash")
-  fullName     String   @map("full_name")
-  shopName     String?  @map("shop_name")
-  phone        String?
-  role         String   @default("staff")
-  createdAt    DateTime @default(now()) @map("created_at")
-  updatedAt    DateTime @default(now()) @updatedAt @map("updated_at")
-  shopId       String?  @map("shop_id") @db.Uuid
-  shop         Shop?    @relation(fields: [shopId], references: [id], onDelete: Cascade)
-  clerkUserId  String?  @unique @map("clerk_user_id")
+  id          String   @id @default(uuid()) @db.Uuid
+  username    String   @unique
+  email       String?  @unique
+  fullName    String   @map("full_name")
+  shopName    String?  @map("shop_name")
+  phone       String?
+  role        String   @default("staff")
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @default(now()) @updatedAt @map("updated_at")
+  shopId      String?  @map("shop_id") @db.Uuid
+  shop        Shop?    @relation(fields: [shopId], references: [id], onDelete: Cascade)
+  clerkUserId String?  @unique @map("clerk_user_id")
 
   shiftRegisters ShiftRegister[]
 
@@ -52,7 +51,7 @@ model User {
 }
 
 model Supplier {
-  id        Int      @id @default(autoincrement())
+  id        String   @id @default(uuid()) @db.Uuid
   name      String
   address   String?
   phone     String?
@@ -68,13 +67,13 @@ model Supplier {
 }
 
 model Item {
-  id            Int      @id @default(autoincrement())
+  id            String   @id @default(uuid()) @db.Uuid
   name          String
   buyingPrice   Decimal  @default(0) @map("buying_price") @db.Decimal(10, 2)
   sellingPrice  Decimal  @default(0) @map("selling_price") @db.Decimal(10, 2)
   quantity      Int      @default(0)
   minStockLevel Int      @default(5) @map("min_stock_level")
-  supplierId    Int?     @map("supplier_id")
+  supplierId    String?  @map("supplier_id") @db.Uuid
   category      String?  @default("General")
   barcode       String?
   createdAt     DateTime @default(now()) @map("created_at")
@@ -88,9 +87,9 @@ model Item {
 }
 
 model Purchase {
-  id            Int      @id @default(autoincrement())
-  supplierId    Int      @map("supplier_id")
-  itemId        Int      @map("item_id")
+  id            String   @id @default(uuid()) @db.Uuid
+  supplierId    String   @map("supplier_id") @db.Uuid
+  itemId        String   @map("item_id") @db.Uuid
   quantity      Int
   buyingPrice   Decimal  @map("buying_price") @db.Decimal(10, 2)
   totalCost     Decimal  @map("total_cost") @db.Decimal(10, 2)
@@ -104,7 +103,7 @@ model Purchase {
 }
 
 model Customer {
-  id          Int      @id @default(autoincrement())
+  id          String   @id @default(uuid()) @db.Uuid
   name        String
   phone       String?
   email       String?
@@ -122,9 +121,9 @@ model Customer {
 }
 
 model Sale {
-  id            Int      @id @default(autoincrement())
+  id            String   @id @default(uuid()) @db.Uuid
   receiptNumber String?  @map("receipt_number")
-  customerId    Int?     @map("customer_id")
+  customerId    String?  @map("customer_id") @db.Uuid
   customerName  String?  @map("customer_name")
   customerPhone String?  @map("customer_phone")
   totalAmount   Decimal  @default(0) @map("total_amount") @db.Decimal(10, 2)
@@ -143,9 +142,9 @@ model Sale {
 }
 
 model SaleItem {
-  id          Int      @id @default(autoincrement())
-  saleId      Int      @map("sale_id")
-  itemId      Int      @map("item_id")
+  id          String   @id @default(uuid()) @db.Uuid
+  saleId      String   @map("sale_id") @db.Uuid
+  itemId      String   @map("item_id") @db.Uuid
   itemName    String   @map("item_name")
   quantity    Int
   unitPrice   Decimal  @map("unit_price") @db.Decimal(10, 2)
@@ -161,14 +160,14 @@ model SaleItem {
 }
 
 model StockMovement {
-  id            Int      @id @default(autoincrement())
-  itemId        Int      @map("item_id")
+  id            String   @id @default(uuid()) @db.Uuid
+  itemId        String   @map("item_id") @db.Uuid
   itemName      String   @map("item_name")
   movementType  String   @map("movement_type")
   quantity      Int
   balanceAfter  Int      @default(0) @map("balance_after")
   referenceType String?  @map("reference_type")
-  referenceId   Int?     @map("reference_id")
+  referenceId   String?  @map("reference_id") @db.Uuid
   supplierName  String?  @map("supplier_name")
   notes         String?
   createdAt     DateTime @default(now()) @map("created_at")
@@ -179,10 +178,10 @@ model StockMovement {
 }
 
 model CreditLedger {
-  id           Int       @id @default(autoincrement())
-  customerId   Int       @map("customer_id")
+  id           String    @id @default(uuid()) @db.Uuid
+  customerId   String    @map("customer_id") @db.Uuid
   customerName String    @map("customer_name")
-  saleId       Int       @map("sale_id")
+  saleId       String    @map("sale_id") @db.Uuid
   amount       Decimal   @map("amount") @db.Decimal(10, 2)
   paidAmount   Decimal?  @default(0) @map("paid_amount") @db.Decimal(10, 2)
   balance      Decimal   @map("balance") @db.Decimal(10, 2)
@@ -200,9 +199,9 @@ model CreditLedger {
 }
 
 model CreditPayment {
-  id            Int      @id @default(autoincrement())
-  creditId      Int      @map("credit_id")
-  customerId    Int      @map("customer_id")
+  id            String   @id @default(uuid()) @db.Uuid
+  creditId      String   @map("credit_id") @db.Uuid
+  customerId    String   @map("customer_id") @db.Uuid
   amount        Decimal  @db.Decimal(10, 2)
   paymentMethod String   @default("cash") @map("payment_method")
   notes         String?
@@ -214,7 +213,7 @@ model CreditPayment {
 }
 
 model GeneralLedger {
-  id          Int      @id @default(autoincrement())
+  id          String   @id @default(uuid()) @db.Uuid
   date        DateTime @db.Date
   description String
   debit       Decimal? @db.Decimal(10, 2)
@@ -229,8 +228,8 @@ model GeneralLedger {
 }
 
 model ShiftRegister {
-  id        Int       @id @default(autoincrement())
-  userId    Int       @map("user_id")
+  id        String    @id @default(uuid()) @db.Uuid
+  userId    String    @map("user_id") @db.Uuid
   user      User      @relation(fields: [userId], references: [id])
   startTime DateTime  @map("start_time")
   endTime   DateTime? @map("end_time")
