@@ -40,6 +40,11 @@ router.post("/open", async (req, res) => {
     const shopId = req.user.shop_id;
     const userId = req.user.id;
 
+    // Check if user has a shop assigned
+    if (!shopId) {
+      return res.status(400).json({ error: "No shop assigned. Please contact your administrator." });
+    }
+
     // Check if already open
     const existing = await prisma.shiftRegister.findFirst({
       where: { shopId, userId, status: "open" },
@@ -396,7 +401,6 @@ router.post("/pumps", async (req, res) => {
             fuelType: n.fuelType,
             unitPrice: parseFloat(n.unitPrice) || 0,
             isActive: true,
-            shopId,
           })),
         },
       },
