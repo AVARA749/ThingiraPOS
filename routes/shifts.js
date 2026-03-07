@@ -5,47 +5,82 @@ const { authenticateToken } = require("../middleware/auth");
 const router = express.Router();
 router.use(authenticateToken);
 
-// GET /api/shifts/status - Check if a shift is open
+// GET /api/shifts/status - Check for open or assigned shifts
 router.get("/status", async (req, res) => {
   try {
     const shopId = req.user.shop_id;
     const userId = req.user.id;
 
-    const shift = await prisma.shiftRegister.findFirst({
+    // First check for active open shift
+    let shift = await prisma.shiftRegister.findFirst({
       where: { shopId, userId, status: "open" },
       orderBy: { startTime: "desc" },
       include: {
         nozzleShiftReadings: {
           include: {
             nozzle: {
-              include: { pump: true }
-            }
-          }
+              include: { pump: true },
+            },
+          },
         },
-        pettyCashEntries: true
-      }
+      },
     });
 
-    res.json({ isOpen: !!shift, shift });
+    if (shift) {
+      return res.json({ isOpen: true, shift });
+    }
+
+    // If no open shift, check for assigned shifts
+    const assignedShifts = await prisma.shiftRegister.findMany({
+      where: { shopId, userId, status: "assigned" },
+      orderBy: { createdAt: "desc" },
+    });
+
+    res.json({ isOpen: false, assignedShifts });
   } catch (err) {
     console.error("Shift status error:", err);
     res.status(500).json({ error: "Failed to check shift status." });
   }
 });
 
-// POST /api/shifts/open - Start a new shift with optional nozzle readings
+// POST /api/shifts/assign - Admin pre-assigns a shift to a staff member
+router.post("/assign", async (req, res) => {
+  try {
+    if (req.user.role !== "admin" && req.user.role !== "owner") {
+      return res.status(403).json({ error: "Only admins can assign shifts." });
+    }
+
+    const { userId, notes } = req.body;
+    const shopId = req.user.shop_id;
+
+    const shift = await prisma.shiftRegister.create({
+      data: {
+        shopId,
+        userId,
+        notes: notes || "",
+        status: "assigned",
+      },
+    });
+
+    res.status(201).json(shift);
+  } catch (err) {
+    console.error("Shift assign error:", err);
+    res.status(500).json({ error: "Failed to assign shift." });
+  }
+});
+
+// POST /api/shifts/open - Start an assigned shift OR open a new one
 router.post("/open", async (req, res) => {
   try {
-    const { opening_balance, notes, nozzleReadings } = req.body;
+    const { opening_balance, notes, nozzleReadings, shiftId } = req.body;
     const shopId = req.user.shop_id;
     const userId = req.user.id;
 
-    // Check if user has a shop assigned
     if (!shopId) {
-      return res.status(400).json({ error: "No shop assigned. Please contact your administrator." });
+      return res.status(400).json({ error: "No shop assigned." });
     }
 
-    // Check if already open
+    // Check if user already has an open shift
     const existing = await prisma.shiftRegister.findFirst({
       where: { shopId, userId, status: "open" },
     });
@@ -54,19 +89,39 @@ router.post("/open", async (req, res) => {
     }
 
     const result = await prisma.$transaction(async (tx) => {
-      // Create the shift
-      const shift = await tx.shiftRegister.create({
-        data: {
-          shopId,
-          userId,
-          startCash: parseFloat(opening_balance || 0),
-          notes: notes || "",
-          status: "open",
-        },
-      });
+      let shift;
+
+      if (shiftId) {
+        // Starting a pre-assigned shift
+        shift = await tx.shiftRegister.update({
+          where: { id: shiftId, userId, status: "assigned" },
+          data: {
+            status: "open",
+            startTime: new Date(),
+            startCash: parseFloat(opening_balance || 0),
+            notes: notes || undefined,
+          },
+        });
+      } else {
+        // Opening an ad-hoc shift (if allowed, or just create new)
+        shift = await tx.shiftRegister.create({
+          data: {
+            shopId,
+            userId,
+            startCash: parseFloat(opening_balance || 0),
+            notes: notes || "",
+            status: "open",
+            startTime: new Date(),
+          },
+        });
+      }
 
       // If nozzle readings provided, create them
-      if (nozzleReadings && Array.isArray(nozzleReadings) && nozzleReadings.length > 0) {
+      if (
+        nozzleReadings &&
+        Array.isArray(nozzleReadings) &&
+        nozzleReadings.length > 0
+      ) {
         for (const reading of nozzleReadings) {
           await tx.nozzleShiftReading.create({
             data: {
@@ -92,7 +147,8 @@ router.post("/open", async (req, res) => {
 // POST /api/shifts/close - Close shift with validation and petty cash
 router.post("/close", async (req, res) => {
   try {
-    const { closing_balance, notes, nozzleReadings, pettyCashExpenses, skipMeterValidation } = req.body;
+    const { closing_balance, notes, nozzleReadings, skipMeterValidation } =
+      req.body;
     const shopId = req.user.shop_id;
     const userId = req.user.id;
     const isAdmin = req.user.role === "admin";
@@ -102,9 +158,9 @@ router.post("/close", async (req, res) => {
       orderBy: { startTime: "desc" },
       include: {
         nozzleShiftReadings: {
-          include: { nozzle: true }
-        }
-      }
+          include: { nozzle: true },
+        },
+      },
     });
 
     if (!shift) {
@@ -112,27 +168,35 @@ router.post("/close", async (req, res) => {
     }
 
     // Validate nozzle readings if provided
-    if (nozzleReadings && Array.isArray(nozzleReadings) && !skipMeterValidation) {
+    if (
+      nozzleReadings &&
+      Array.isArray(nozzleReadings) &&
+      !skipMeterValidation
+    ) {
       for (const reading of nozzleReadings) {
         const existingReading = shift.nozzleShiftReadings.find(
-          nr => nr.nozzleId === reading.nozzleId
+          (nr) => nr.nozzleId === reading.nozzleId,
         );
-        
-        if (existingReading && reading.closingReading < existingReading.openingReading) {
+
+        if (
+          existingReading &&
+          reading.closingReading < existingReading.openingReading
+        ) {
           return res.status(400).json({
             error: `Meter rollback detected for nozzle ${reading.nozzleId}. Please verify reading.`,
-            code: "METER_ROLLBACK"
+            code: "METER_ROLLBACK",
           });
         }
 
         // Check for unreasonably high volume (configurable threshold, default 5000L)
         if (existingReading) {
-          const volumeSold = reading.closingReading - existingReading.openingReading;
+          const volumeSold =
+            reading.closingReading - existingReading.openingReading;
           if (volumeSold > 5000) {
             return res.status(400).json({
               error: `This volume (${volumeSold}L) seems unusually high. Are you sure?`,
               code: "HIGH_VOLUME_WARNING",
-              volume: volumeSold
+              volume: volumeSold,
             });
           }
         }
@@ -161,9 +225,15 @@ router.post("/close", async (req, res) => {
         },
       });
 
-      const cashSales = cashSalesResult.find(s => s.paymentType === "cash")?._sum?.totalAmount || 0;
-      const cardSales = cashSalesResult.find(s => s.paymentType === "card")?._sum?.totalAmount || 0;
-      const mpesaSales = cashSalesResult.find(s => s.paymentType === "mpesa")?._sum?.totalAmount || 0;
+      const cashSales =
+        cashSalesResult.find((s) => s.paymentType === "cash")?._sum
+          ?.totalAmount || 0;
+      const cardSales =
+        cashSalesResult.find((s) => s.paymentType === "card")?._sum
+          ?.totalAmount || 0;
+      const mpesaSales =
+        cashSalesResult.find((s) => s.paymentType === "mpesa")?._sum
+          ?.totalAmount || 0;
 
       const expectedCash = parseFloat(shift.startCash) + parseFloat(cashSales);
       const variance = parseFloat(closing_balance) - expectedCash;
@@ -172,12 +242,16 @@ router.post("/close", async (req, res) => {
       if (nozzleReadings && Array.isArray(nozzleReadings)) {
         for (const reading of nozzleReadings) {
           const existingReading = shift.nozzleShiftReadings.find(
-            nr => nr.nozzleId === reading.nozzleId
+            (nr) => nr.nozzleId === reading.nozzleId,
           );
 
           if (existingReading) {
-            const volumeSold = parseFloat(reading.closingReading) - parseFloat(existingReading.openingReading);
-            const nozzle = await tx.nozzle.findUnique({ where: { id: reading.nozzleId } });
+            const volumeSold =
+              parseFloat(reading.closingReading) -
+              parseFloat(existingReading.openingReading);
+            const nozzle = await tx.nozzle.findUnique({
+              where: { id: reading.nozzleId },
+            });
             const amountSold = volumeSold * parseFloat(nozzle?.unitPrice || 0);
 
             await tx.nozzleShiftReading.update({
@@ -193,39 +267,14 @@ router.post("/close", async (req, res) => {
         }
       }
 
-      // Create petty cash entries
-      if (pettyCashExpenses && Array.isArray(pettyCashExpenses) && pettyCashExpenses.length > 0) {
-        for (const expense of pettyCashExpenses) {
-          await tx.pettyCashEntry.create({
-            data: {
-              shiftId: shift.id,
-              amount: parseFloat(expense.amount),
-              category: expense.category || "other",
-              description: expense.description || "",
-              shopId,
-            },
-          });
-        }
-      }
-
-      // Calculate total petty cash for the shift
-      const pettyCashTotal = await tx.pettyCashEntry.aggregate({
-        _sum: { amount: true },
-        where: { shiftId: shift.id },
-      });
-
-      // Adjust expected cash for petty cash
-      const adjustedExpectedCash = expectedCash - (pettyCashTotal._sum.amount || 0);
-      const adjustedVariance = parseFloat(closing_balance) - adjustedExpectedCash;
-
       return await tx.shiftRegister.update({
         where: { id: shift.id },
         data: {
           endTime: new Date(),
           endCash: parseFloat(closing_balance),
-          expectedCash: adjustedExpectedCash,
+          expectedCash: expectedCash,
           actualCash: parseFloat(closing_balance),
-          variance: adjustedVariance,
+          variance: variance,
           totalCashSales: parseFloat(cashSales),
           totalCardSales: parseFloat(cardSales),
           totalMpesaSales: parseFloat(mpesaSales),
@@ -248,9 +297,8 @@ router.get("/history", async (req, res) => {
     const shopId = req.user.shop_id;
     const shifts = await prisma.shiftRegister.findMany({
       where: { shopId },
-      include: { 
+      include: {
         user: { select: { fullName: true } },
-        pettyCashEntries: true
       },
       orderBy: { startTime: "desc" },
       take: 100,
@@ -260,7 +308,6 @@ router.get("/history", async (req, res) => {
       shifts.map((s) => ({
         ...s,
         user_name: s.user?.fullName || "Unknown",
-        pettyCashTotal: s.pettyCashEntries?.reduce((sum, e) => sum + parseFloat(e.amount), 0) || 0,
       })),
     );
   } catch (err) {
@@ -274,8 +321,11 @@ router.get("/analytics", async (req, res) => {
   try {
     const { startDate, endDate, shopId: queryShopId } = req.query;
     const shopId = queryShopId || req.user.shop_id;
-    
-    const start = startDate ? new Date(startDate) : new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
+
+    const start =
+      startDate ?
+        new Date(startDate)
+      : new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
     const end = endDate ? new Date(endDate) : new Date();
 
     // Get shifts in date range
@@ -288,17 +338,29 @@ router.get("/analytics", async (req, res) => {
       include: {
         user: { select: { fullName: true } },
         nozzleShiftReadings: {
-          include: { nozzle: true }
-        }
+          include: { nozzle: true },
+        },
       },
       orderBy: { startTime: "desc" },
     });
 
     // Calculate totals
-    const totalCashSales = shifts.reduce((sum, s) => sum + (parseFloat(s.totalCashSales) || 0), 0);
-    const totalCardSales = shifts.reduce((sum, s) => sum + (parseFloat(s.totalCardSales) || 0), 0);
-    const totalMpesaSales = shifts.reduce((sum, s) => sum + (parseFloat(s.totalMpesaSales) || 0), 0);
-    const totalVariance = shifts.reduce((sum, s) => sum + (parseFloat(s.variance) || 0), 0);
+    const totalCashSales = shifts.reduce(
+      (sum, s) => sum + (parseFloat(s.totalCashSales) || 0),
+      0,
+    );
+    const totalCardSales = shifts.reduce(
+      (sum, s) => sum + (parseFloat(s.totalCardSales) || 0),
+      0,
+    );
+    const totalMpesaSales = shifts.reduce(
+      (sum, s) => sum + (parseFloat(s.totalMpesaSales) || 0),
+      0,
+    );
+    const totalVariance = shifts.reduce(
+      (sum, s) => sum + (parseFloat(s.variance) || 0),
+      0,
+    );
 
     // Get fuel distribution from nozzle readings
     const fuelDistribution = {};
@@ -308,8 +370,10 @@ router.get("/analytics", async (req, res) => {
         if (!fuelDistribution[fuelType]) {
           fuelDistribution[fuelType] = { volume: 0, amount: 0 };
         }
-        fuelDistribution[fuelType].volume += parseFloat(reading.volumeSold) || 0;
-        fuelDistribution[fuelType].amount += parseFloat(reading.amountSold) || 0;
+        fuelDistribution[fuelType].volume +=
+          parseFloat(reading.volumeSold) || 0;
+        fuelDistribution[fuelType].amount +=
+          parseFloat(reading.amountSold) || 0;
       }
     }
 
@@ -320,7 +384,7 @@ router.get("/analytics", async (req, res) => {
       if (!dailySales[date]) {
         dailySales[date] = { petrol: 0, diesel: 0, kerosene: 0, total: 0 };
       }
-      
+
       for (const reading of shift.nozzleShiftReadings || []) {
         const fuelType = reading.nozzle?.fuelType || "petrol";
         const amount = parseFloat(reading.amountSold) || 0;
@@ -335,12 +399,18 @@ router.get("/analytics", async (req, res) => {
       cashierName: s.user?.fullName || "Unknown",
       date: new Date(s.startTime).toISOString().split("T")[0],
       variance: parseFloat(s.variance) || 0,
-      status: (s.variance || 0) === 0 ? "balanced" : (s.variance > 0 ? "surplus" : "shortage"),
+      status:
+        (s.variance || 0) === 0 ? "balanced"
+        : s.variance > 0 ? "surplus"
+        : "shortage",
     }));
 
     res.json({
       totalSales: totalCashSales + totalCardSales + totalMpesaSales,
-      totalVolume: Object.values(fuelDistribution).reduce((sum, f) => sum + f.volume, 0),
+      totalVolume: Object.values(fuelDistribution).reduce(
+        (sum, f) => sum + f.volume,
+        0,
+      ),
       totalVariance,
       shiftCount: shifts.length,
       salesTrends: Object.entries(dailySales).map(([date, data]) => ({
@@ -348,12 +418,20 @@ router.get("/analytics", async (req, res) => {
         ...data,
       })),
       varianceData,
-      fuelDistribution: Object.entries(fuelDistribution).map(([fuelType, data]) => ({
-        fuelType,
-        volume: data.volume,
-        amount: data.amount,
-        percentage: (data.volume / (Object.values(fuelDistribution).reduce((s, f) => s + f.volume, 0) || 1)) * 100,
-      })),
+      fuelDistribution: Object.entries(fuelDistribution).map(
+        ([fuelType, data]) => ({
+          fuelType,
+          volume: data.volume,
+          amount: data.amount,
+          percentage:
+            (data.volume /
+              (Object.values(fuelDistribution).reduce(
+                (s, f) => s + f.volume,
+                0,
+              ) || 1)) *
+            100,
+        }),
+      ),
     });
   } catch (err) {
     console.error("Analytics error:", err);
@@ -414,39 +492,6 @@ router.post("/pumps", async (req, res) => {
   }
 });
 
-// POST /api/shifts/petty-cash - Add petty cash entry during active shift
-router.post("/petty-cash", async (req, res) => {
-  try {
-    const { amount, category, description } = req.body;
-    const shopId = req.user.shop_id;
-    const userId = req.user.id;
-
-    // Find active shift
-    const shift = await prisma.shiftRegister.findFirst({
-      where: { shopId, userId, status: "open" },
-    });
-
-    if (!shift) {
-      return res.status(404).json({ error: "No open shift found." });
-    }
-
-    const entry = await prisma.pettyCashEntry.create({
-      data: {
-        shiftId: shift.id,
-        amount: parseFloat(amount),
-        category: category || "other",
-        description: description || "",
-        shopId,
-      },
-    });
-
-    res.status(201).json(entry);
-  } catch (err) {
-    console.error("Petty cash error:", err);
-    res.status(500).json({ error: "Failed to add petty cash entry." });
-  }
-});
-
 // GET /api/shifts/:id - Get shift details with all readings
 router.get("/:id", async (req, res) => {
   try {
@@ -460,7 +505,6 @@ router.get("/:id", async (req, res) => {
         nozzleShiftReadings: {
           include: { nozzle: { include: { pump: true } } },
         },
-        pettyCashEntries: true,
       },
     });
 

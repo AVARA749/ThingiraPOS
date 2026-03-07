@@ -176,7 +176,14 @@ router.get("/credit", async (req, res) => {
 
     const outstandingEntries = await prisma.creditLedger.findMany({
       where: { shopId, status: { not: "paid" } },
-      include: { sale: { select: { receiptNumber: true } } },
+      include: {
+        sale: {
+          select: { receiptNumber: true },
+        },
+        customer: {
+          select: { name: true },
+        },
+      },
       orderBy: { createdAt: "desc" },
     });
 
