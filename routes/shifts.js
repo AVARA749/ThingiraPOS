@@ -485,10 +485,131 @@ router.post("/pumps", async (req, res) => {
       include: { nozzles: true },
     });
 
+    // Sync nozzle prices with Inventory items
+    const nozzleUpdates = nozzles.map((n) =>
+      prisma.item.updateMany({
+        where: {
+          shop_id: shopId,
+          category: "Fuel",
+          name: { contains: n.fuelType, mode: "insensitive" },
+        },
+        data: { selling_price: parseFloat(n.unitPrice) },
+      }),
+    );
+
+    await Promise.all(nozzleUpdates);
+
     res.status(201).json(pump);
   } catch (err) {
     console.error("Create pump error:", err);
     res.status(500).json({ error: "Failed to create pump." });
+  }
+});
+
+// PUT /api/shifts/pumps/:id - Update a pump and its nozzles
+router.put("/pumps/:id", async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { name, pumpNumber, nozzles } = req.body;
+    const shopId = req.user.shop_id;
+
+    const result = await prisma.$transaction(async (tx) => {
+      // 1. Update Pump metadata
+      const pump = await tx.pump.update({
+        where: { id, shopId },
+        data: {
+          name,
+          pumpNumber: parseInt(pumpNumber),
+        },
+      });
+
+      // 2. Handle nozzles
+      const nozzleIdsToKeep = nozzles.filter((n) => n.id).map((n) => n.id);
+
+      // Soft delete removed nozzles
+      await tx.nozzle.updateMany({
+        where: {
+          pumpId: id,
+          id: { notIn: nozzleIdsToKeep },
+        },
+        data: { isActive: false },
+      });
+
+      // Update or create nozzles
+      for (const n of nozzles) {
+        if (n.id) {
+          await tx.nozzle.update({
+            where: { id: n.id },
+            data: {
+              nozzleNumber: parseInt(n.nozzleNumber),
+              fuelType: n.fuelType,
+              unitPrice: parseFloat(n.unitPrice),
+              isActive: true,
+            },
+          });
+        } else {
+          await tx.nozzle.create({
+            data: {
+              pumpId: id,
+              nozzleNumber: parseInt(n.nozzleNumber),
+              fuelType: n.fuelType,
+              unitPrice: parseFloat(n.unitPrice),
+              isActive: true,
+            },
+          });
+        }
+
+        // 3. Price Synchronization Logic (Sync with Inventory)
+        const fuelItem = await tx.item.findFirst({
+          where: {
+            shopId,
+            category: { equals: "Fuel", mode: "insensitive" },
+            name: { equals: n.fuelType, mode: "insensitive" },
+          },
+        });
+
+        if (fuelItem) {
+          await tx.item.update({
+            where: { id: fuelItem.id },
+            data: { sellingPrice: parseFloat(n.unitPrice) },
+          });
+        }
+      }
+
+      return await tx.pump.findUnique({
+        where: { id },
+        include: { nozzles: { where: { isActive: true } } },
+      });
+    });
+
+    res.json(result);
+  } catch (err) {
+    console.error("Update pump error:", err);
+    res.status(500).json({ error: "Failed to update pump." });
+  }
+});
+
+// DELETE /api/shifts/pumps/:id - Soft delete a pump
+router.delete("/pumps/:id", async (req, res) => {
+  try {
+    const { id } = req.params;
+    const shopId = req.user.shop_id;
+
+    await prisma.$transaction([
+      prisma.pump.update({
+        where: { id, shopId },
+        data: { isActive: false },
+      }),
+      prisma.nozzle.updateMany({
+        where: { pumpId: id },
+        data: { isActive: false },
+      }),
+    ]);
+
+    res.status(204).send();
+  } catch (err) {
+    console.error("Delete pump error:", err);
+    res.status(500).json({ error: "Failed to delete pump." });
   }
 });
 
