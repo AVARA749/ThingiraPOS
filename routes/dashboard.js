@@ -8,19 +8,37 @@ router.use(authenticateToken);
 // GET /api/dashboard/summary
 router.get("/summary", async (req, res) => {
   try {
-    const todayStr = new Date().toISOString().split("T")[0];
-    const startOfDay = new Date();
-    startOfDay.setHours(0, 0, 0, 0);
-    const endOfDay = new Date();
-    endOfDay.setHours(23, 59, 59, 999);
+    const { startDate, endDate } = req.query;
     const shopId = req.user.shop_id;
+    const isStaff = req.user.role === "staff";
+
+    let dateFilter = {};
+    if (!isStaff && startDate && endDate) {
+      dateFilter = {
+        gte: new Date(startDate),
+        lte: new Date(new Date(endDate).setHours(23, 59, 59, 999)),
+      };
+    } else {
+      const startOfDay = new Date();
+      startOfDay.setHours(0, 0, 0, 0);
+      const endOfDay = new Date();
+      endOfDay.setHours(23, 59, 59, 999);
+      dateFilter = { gte: startOfDay, lte: endOfDay };
+    }
+
+    const whereClause = {
+      shopId: shopId,
+      status: "completed",
+      createdAt: dateFilter,
+    };
+
+    // Staff only see their own performance
+    if (isStaff) {
+      whereClause.userId = req.user.id;
+    }
 
     const sales = await prisma.sale.findMany({
-      where: {
-        shopId: shopId,
-        status: "completed",
-        createdAt: { gte: startOfDay, lte: endOfDay },
-      },
+      where: whereClause,
       include: { saleItems: { select: { quantity: true } } },
     });
 
@@ -53,14 +71,21 @@ router.get("/summary", async (req, res) => {
       },
     );
 
-    // Use raw query for column-to-column comparison (quantity <= min_stock_level)
-    const lowStock =
-      await prisma.$queryRaw`SELECT id, name, quantity, min_stock_level as "minStockLevel", selling_price as "sellingPrice" FROM items WHERE quantity <= min_stock_level AND shop_id = ${shopId} ORDER BY quantity ASC`;
+    let lowStock = [];
+    // Only admins see low stock alerts
+    if (!isStaff) {
+      lowStock = await prisma.$queryRaw`
+        SELECT id, name, quantity, min_stock_level as "minStockLevel", selling_price as "sellingPrice" 
+        FROM items 
+        WHERE quantity <= min_stock_level AND shop_id = ${shopId} 
+        ORDER BY quantity ASC
+      `;
+    }
 
     res.json({
       ...summary,
       low_stock_items: lowStock,
-      date: todayStr,
+      date: startDate || new Date().toISOString().split("T")[0],
     });
   } catch (err) {
     console.error("Dashboard summary error:", err);
@@ -71,18 +96,36 @@ router.get("/summary", async (req, res) => {
 // GET /api/dashboard/hourly-sales
 router.get("/hourly-sales", async (req, res) => {
   try {
-    const startOfDay = new Date();
-    startOfDay.setHours(0, 0, 0, 0);
-    const endOfDay = new Date();
-    endOfDay.setHours(23, 59, 59, 999);
+    const { startDate, endDate } = req.query;
     const shopId = req.user.shop_id;
+    const isStaff = req.user.role === "staff";
+
+    let dateFilter = {};
+    if (!isStaff && startDate && endDate) {
+      dateFilter = {
+        gte: new Date(startDate),
+        lte: new Date(new Date(endDate).setHours(23, 59, 59, 999)),
+      };
+    } else {
+      const startOfDay = new Date();
+      startOfDay.setHours(0, 0, 0, 0);
+      const endOfDay = new Date();
+      endOfDay.setHours(23, 59, 59, 999);
+      dateFilter = { gte: startOfDay, lte: endOfDay };
+    }
+
+    const whereClause = {
+      shopId,
+      status: "completed",
+      createdAt: dateFilter,
+    };
+
+    if (isStaff) {
+      whereClause.userId = req.user.id;
+    }
 
     const sales = await prisma.sale.findMany({
-      where: {
-        shopId,
-        status: "completed",
-        createdAt: { gte: startOfDay, lte: endOfDay },
-      },
+      where: whereClause,
     });
 
     const hourly = sales.reduce((acc, sale) => {
@@ -112,14 +155,30 @@ router.get("/hourly-sales", async (req, res) => {
 // GET /api/dashboard/top-items
 router.get("/top-items", async (req, res) => {
   try {
-    const startOfDay = new Date();
-    startOfDay.setHours(0, 0, 0, 0);
+    const { startDate, endDate } = req.query;
     const shopId = req.user.shop_id;
+    const isStaff = req.user.role === "staff";
+
+    let dateFilter = {};
+    if (!isStaff && startDate && endDate) {
+      dateFilter = {
+        gte: new Date(startDate),
+        lte: new Date(new Date(endDate).setHours(23, 59, 59, 999)),
+      };
+    } else {
+      const startOfDay = new Date();
+      startOfDay.setHours(0, 0, 0, 0);
+      dateFilter = { gte: startOfDay };
+    }
 
     const saleItems = await prisma.saleItem.findMany({
       where: {
         shopId,
-        sale: { status: "completed", createdAt: { gte: startOfDay } },
+        sale: {
+          status: "completed",
+          createdAt: dateFilter,
+          ...(isStaff ? { userId: req.user.id } : {}),
+        },
       },
     });
 
@@ -146,11 +205,20 @@ router.get("/top-items", async (req, res) => {
 router.get("/recent-transactions", async (req, res) => {
   try {
     const shopId = req.user.shop_id;
-    const startOfDay = new Date();
-    startOfDay.setHours(0, 0, 0, 0);
+    const isStaff = req.user.role === "staff";
+
+    const whereClause = { shopId };
+
+    // Staff limited to their own today's transactions
+    if (isStaff) {
+      const startOfDay = new Date();
+      startOfDay.setHours(0, 0, 0, 0);
+      whereClause.userId = req.user.id;
+      whereClause.createdAt = { gte: startOfDay };
+    }
 
     const transactions = await prisma.sale.findMany({
-      where: { shopId, createdAt: { gte: startOfDay } },
+      where: whereClause,
       include: { _count: { select: { saleItems: true } } },
       orderBy: { createdAt: "desc" },
       take: 10,

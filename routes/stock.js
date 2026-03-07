@@ -72,8 +72,16 @@ router.get("/in", async (req, res) => {
       where,
       orderBy: { createdAt: "desc" },
     });
-    res.json(movements);
+
+    res.json(
+      movements.map((m) => ({
+        ...m,
+        balance_after: m.balanceAfter,
+        item_name: m.itemName,
+      })),
+    );
   } catch (err) {
+    console.error("Stock In error:", err);
     res.status(500).json({ error: "Failed to fetch stock in." });
   }
 });
@@ -91,8 +99,16 @@ router.get("/out", async (req, res) => {
       where,
       orderBy: { createdAt: "desc" },
     });
-    res.json(movements);
+
+    res.json(
+      movements.map((m) => ({
+        ...m,
+        balance_after: m.balanceAfter,
+        item_name: m.itemName,
+      })),
+    );
   } catch (err) {
+    console.error("Stock Out error:", err);
     res.status(500).json({ error: "Failed to fetch stock out." });
   }
 });
