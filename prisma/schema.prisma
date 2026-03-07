@@ -28,7 +28,6 @@ model Shop {
   generalLedgers    GeneralLedger[]
   shiftRegisters   ShiftRegister[]
   pumps             Pump[]
-  pettyCashEntries PettyCashEntry[]
 
   @@map("shops")
 }
@@ -144,6 +143,7 @@ model Sale {
 
   customer  Customer?  @relation(fields: [customerId], references: [id])
   saleItems SaleItem[]
+  creditLedgers CreditLedger[]
 
   @@unique([shopId, receiptNumber])
   @@map("sales")
@@ -202,6 +202,7 @@ model CreditLedger {
   shop         Shop?     @relation(fields: [shopId], references: [id], onDelete: Cascade)
 
   customer Customer @relation(fields: [customerId], references: [id])
+  sale     Sale     @relation(fields: [saleId], references: [id])
   creditPayments CreditPayment[]
 
   @@map("credit_ledger")
@@ -245,11 +246,11 @@ model ShiftRegister {
   id        String    @id @default(uuid()) @db.Uuid
   userId    String    @map("user_id") @db.Uuid
   user      User      @relation(fields: [userId], references: [id])
-  startTime DateTime  @map("start_time")
+  startTime DateTime? @map("start_time")
   endTime   DateTime? @map("end_time")
-  startCash Decimal   @map("start_cash") @db.Decimal(10, 2)
+  startCash Decimal?  @map("start_cash") @db.Decimal(10, 2)
   endCash   Decimal?  @map("end_cash") @db.Decimal(10, 2)
-  status    String    @default("open")
+  status    String    @default("assigned")
   createdAt DateTime  @default(now()) @map("created_at")
   shopId    String?   @map("shop_id") @db.Uuid
   shop      Shop?     @relation(fields: [shopId], references: [id], onDelete: Cascade)
@@ -264,7 +265,6 @@ model ShiftRegister {
   totalMpesaSales  Decimal?  @map("total_mpesa_sales") @db.Decimal(10, 2)
 
   nozzleShiftReadings NozzleShiftReading[]
-  pettyCashEntries   PettyCashEntry[]
 
   @@map("shift_registers")
 }
@@ -330,26 +330,4 @@ model NozzleShiftReading {
   @@map("nozzle_shift_readings")
 }
 
-// Petty cash categories
-enum PettyCashCategory {
-  office_supplies
-  transport
-  maintenance
-  cleaning
-  other
-}
 
-// Petty cash entries - tracks small expenses during a shift
-model PettyCashEntry {
-  id          String           @id @default(uuid()) @db.Uuid
-  shiftId     String           @map("shift_id") @db.Uuid
-  shift       ShiftRegister    @relation(fields: [shiftId], references: [id], onDelete: Cascade)
-  amount      Decimal          @map("amount") @db.Decimal(10, 2)
-  category    PettyCashCategory @default(other)
-  description String?
-  createdAt   DateTime         @default(now()) @map("created_at")
-  shopId      String?          @map("shop_id") @db.Uuid
-  shop        Shop?            @relation(fields: [shopId], references: [id], onDelete: Cascade)
-
-  @@map("petty_cash_entries")
-}
