@@ -11,7 +11,7 @@ const router = express.Router();
 router.get("/health", async (req, res) => {
   const secret = process.env.CLERK_WEBHOOK_SECRET;
   const databaseUrl = process.env.DATABASE_URL ? "configured" : "missing";
-  
+
   // Test database connection
   let dbStatus = "unknown";
   try {
@@ -20,7 +20,7 @@ router.get("/health", async (req, res) => {
   } catch (err) {
     dbStatus = "error: " + err.message;
   }
-  
+
   res.json({
     status: "ok",
     webhookSecret: secret ? "configured" : "missing",
@@ -38,22 +38,31 @@ router.get("/debug", async (req, res) => {
   const publishableKey = process.env.CLERK_PUBLISHABLE_KEY;
   const secretKey = process.env.CLERK_SECRET_KEY;
   const webhookSecret = process.env.CLERK_WEBHOOK_SECRET;
-  
+
   res.json({
-    clerkPublishableKey: publishableKey ? {
-      present: true,
-      prefix: publishableKey.substring(0, 20) + "...",
-      length: publishableKey.length
-    } : { present: false },
-    clerkSecretKey: secretKey ? {
-      present: true,
-      prefix: secretKey.substring(0, 10) + "...",
-      length: secretKey.length
-    } : { present: false },
-    clerkWebhookSecret: webhookSecret ? {
-      present: true,
-      prefix: webhookSecret.substring(0, 10) + "...",
-    } : { present: false },
+    clerkPublishableKey:
+      publishableKey ?
+        {
+          present: true,
+          prefix: publishableKey.substring(0, 20) + "...",
+          length: publishableKey.length,
+        }
+      : { present: false },
+    clerkSecretKey:
+      secretKey ?
+        {
+          present: true,
+          prefix: secretKey.substring(0, 10) + "...",
+          length: secretKey.length,
+        }
+      : { present: false },
+    clerkWebhookSecret:
+      webhookSecret ?
+        {
+          present: true,
+          prefix: webhookSecret.substring(0, 10) + "...",
+        }
+      : { present: false },
     nodeEnv: process.env.NODE_ENV,
     timestamp: new Date().toISOString(),
   });
@@ -67,27 +76,31 @@ router.get("/debug", async (req, res) => {
 router.post("/test", express.json(), async (req, res) => {
   // Only allow in development or with a test key
   const testKey = req.headers["x-test-key"];
-  if (process.env.NODE_ENV === "production" && testKey !== process.env.WEBHOOK_TEST_KEY) {
+  if (
+    process.env.NODE_ENV === "production" &&
+    testKey !== process.env.WEBHOOK_TEST_KEY
+  ) {
     return res.status(403).json({ error: "Not authorized" });
   }
-  
+
   const { email, clerkUserId, firstName, lastName } = req.body;
-  
+
   if (!email || !clerkUserId) {
     return res.status(400).json({ error: "email and clerkUserId required" });
   }
-  
+
   try {
-    const fullName = `${firstName || ""} ${lastName || ""}`.trim() || email.split("@")[0];
+    const fullName =
+      `${firstName || ""} ${lastName || ""}`.trim() || email.split("@")[0];
     const username = email.split("@")[0];
-    
+
     // Check if user exists
     const existingUser = await prisma.user.findFirst({
       where: {
         OR: [{ clerkUserId }, { email }],
       },
     });
-    
+
     if (existingUser) {
       const updated = await prisma.user.update({
         where: { id: existingUser.id },
@@ -95,7 +108,7 @@ router.post("/test", express.json(), async (req, res) => {
       });
       return res.json({ message: "User updated", user: updated });
     }
-    
+
     // Create new user
     const newUser = await prisma.user.create({
       data: {
@@ -106,7 +119,7 @@ router.post("/test", express.json(), async (req, res) => {
         role: "staff",
       },
     });
-    
+
     res.json({ message: "User created", user: newUser });
   } catch (err) {
     console.error("[Webhook Test] Error:", err);
@@ -152,7 +165,10 @@ router.post(
     }
 
     const { type: eventType, data } = event;
-    console.log(`[Webhook] Received: ${eventType} for user ${data.id}`);
+    const eventId = req.headers["svix-id"];
+    console.log(
+      `[Webhook] Received: ${eventType} (ID: ${eventId}) for user ${data.id}`,
+    );
 
     try {
       if (eventType === "user.created" || eventType === "user.updated") {

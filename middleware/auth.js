@@ -16,11 +16,17 @@ const prisma = require("../prisma/client");
 async function authenticateToken(req, res, next) {
   try {
     const auth = getAuth(req);
-    
+
     // Debug logging
     console.log("[Auth] Request path:", req.originalUrl);
-    console.log("[Auth] Authorization header:", req.headers.authorization ? "Present" : "Missing");
-    console.log("[Auth] getAuth result:", { userId: auth.userId, sessionId: auth.sessionId });
+    console.log(
+      "[Auth] Authorization header:",
+      req.headers.authorization ? "Present" : "Missing",
+    );
+    console.log("[Auth] getAuth result:", {
+      userId: auth.userId,
+      sessionId: auth.sessionId,
+    });
 
     if (!auth.userId) {
       console.log("[Auth] No userId found - token invalid or missing");
@@ -48,41 +54,47 @@ async function authenticateToken(req, res, next) {
 
     if (!dbUser) {
       // Webhook fallback: try to fetch user from Clerk and create locally
-      console.log(`[Auth] User ${auth.userId} not in DB, fetching from Clerk...`);
-      
+      console.log(
+        `[Auth] User ${auth.userId} not in DB, fetching from Clerk...`,
+      );
+
       try {
         const clerkUser = await clerkClient.users.getUser(auth.userId);
         const email = clerkUser.emailAddresses?.[0]?.emailAddress;
-        
+
         if (email) {
           // Check for existing user by email
           const existing = await prisma.user.findFirst({
             where: { email },
-            select: { id: true }
+            select: { id: true },
           });
-          
+
           if (existing) {
             // Link existing user
             await prisma.user.update({
               where: { id: existing.id },
-              data: { clerkUserId: auth.userId }
+              data: { clerkUserId: auth.userId },
             });
-            console.log(`[Auth] Linked user ${existing.id} to Clerk ${auth.userId}`);
+            console.log(
+              `[Auth] Linked user ${existing.id} to Clerk ${auth.userId}`,
+            );
           } else {
             // Create new user
-            const fullName = `${clerkUser.firstName || ""} ${clerkUser.lastName || ""}`.trim() || email.split("@")[0];
+            const fullName =
+              `${clerkUser.firstName || ""} ${clerkUser.lastName || ""}`.trim() ||
+              email.split("@")[0];
             await prisma.user.create({
               data: {
                 clerkUserId: auth.userId,
                 email,
                 fullName,
                 username: email.split("@")[0],
-                role: "staff"
-              }
+                role: "staff",
+              },
             });
             console.log(`[Auth] Created user from Clerk: ${email}`);
           }
-          
+
           // Re-fetch the user we just created/linked
           const newDbUser = await prisma.user.findFirst({
             where: { clerkUserId: auth.userId },
@@ -97,7 +109,7 @@ async function authenticateToken(req, res, next) {
               email: true,
             },
           });
-          
+
           if (newDbUser) {
             // Attach and continue
             req.user = {
@@ -115,7 +127,7 @@ async function authenticateToken(req, res, next) {
       } catch (err) {
         console.error("[Auth] Clerk fallback failed:", err.message);
       }
-      
+
       return res.status(403).json({
         error: "Account not found. Please try signing in again.",
         code: "USER_NOT_FOUND",
@@ -126,7 +138,12 @@ async function authenticateToken(req, res, next) {
     // Check if user has a shop assigned
     if (!dbUser.shopId) {
       // Allow passing through to create a shop if they are calling POST /api/shops
-      if (req.method === "POST" && req.originalUrl === "/api/shops") {
+      // We normalize the path to handle trailing slashes or sub-paths
+      const normalizedPath = req.originalUrl.split("?")[0].replace(/\/$/, "");
+      console.log(
+        `[Auth] No shopId. Method: ${req.method}, Path: ${normalizedPath}`,
+      );
+      if (req.method === "POST" && normalizedPath === "/api/shops") {
         // Let them pass
       } else {
         return res.status(403).json({

@@ -120,18 +120,30 @@ router.post("/", authenticateToken, requireAdmin, async (req, res) => {
     // Send Clerk invitation email so the staff member can sign in
     let inviteSent = false;
     try {
-      await clerkClient.invitations.createInvitation({
-        emailAddress: email,
-        redirectUrl:
-          process.env.CLIENT_ORIGIN?.split(",")[0]?.trim() ||
-          "http://localhost:5173",
+      // Check if there are existing active invitations to avoid duplicates
+      const invitations = await clerkClient.invitations.getInvitationList({
+        emailAddress: staff.email,
+        status: "pending",
       });
-      inviteSent = true;
-      console.log(`\u2709\ufe0f  Clerk invitation sent to ${email}`);
+
+      if (invitations.data.length === 0) {
+        await clerkClient.invitations.createInvitation({
+          emailAddress: staff.email,
+          redirectUrl:
+            process.env.CLIENT_ORIGIN?.split(",")[0]?.trim() ||
+            "http://localhost:5173",
+          ignoreExisting: true,
+        });
+        inviteSent = true;
+        console.log(`✉️  Clerk invitation sent to ${staff.email}`);
+      } else {
+        console.log(
+          `ℹ️  Invitation already pending for ${staff.email} — skipping`,
+        );
+      }
     } catch (inviteErr) {
-      // Non-fatal: staff exists in DB. Likely email already has a Clerk account
       console.warn(
-        `Could not send Clerk invite to ${email}:`,
+        `Could not send Clerk invite to ${staff.email}:`,
         inviteErr?.errors?.[0]?.message || inviteErr?.message,
       );
     }
