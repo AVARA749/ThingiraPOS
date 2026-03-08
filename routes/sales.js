@@ -88,13 +88,17 @@ router.post("/", async (req, res) => {
       // 2. Handle Customer
       let customerId = null;
       if (customer_name) {
+        const customerOrConditions = [
+          { name: { equals: customer_name, mode: "insensitive" } },
+        ];
+        if (customer_phone) {
+          customerOrConditions.push({ phone: customer_phone });
+        }
+
         let customer = await tx.customer.findFirst({
           where: {
             shopId: shopId,
-            OR: [
-              { name: { equals: customer_name, mode: "insensitive" } },
-              { phone: customer_phone || undefined },
-            ],
+            OR: customerOrConditions,
           },
         });
 
