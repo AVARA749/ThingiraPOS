@@ -189,7 +189,7 @@ router.put("/:id", async (req, res) => {
       category,
       barcode,
     } = req.body;
-    const itemId = parseInt(req.params.id);
+    const itemId = req.params.id;
     const shopId = req.user.shop_id;
 
     const existing = await prisma.item.findFirst({
@@ -260,7 +260,7 @@ router.put("/:id", async (req, res) => {
 // DELETE /api/items/:id
 router.delete("/:id", async (req, res) => {
   try {
-    const itemId = parseInt(req.params.id);
+    const itemId = req.params.id;
     const shopId = req.user.shop_id;
 
     const item = await prisma.item.findFirst({

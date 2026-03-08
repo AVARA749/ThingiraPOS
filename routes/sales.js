@@ -263,7 +263,15 @@ router.post("/", async (req, res) => {
       receipt_number: result.receiptNumber,
     });
   } catch (err) {
-    console.error("Sale creation error:", err);
+    if (
+      err.message &&
+      (err.message.includes("Insufficient stock") ||
+        err.message.includes("not found"))
+    ) {
+      console.warn("Sale creation validation warning:", err.message);
+    } else {
+      console.error("Sale creation error:", err);
+    }
     res.status(400).json({ error: err.message || "Failed to process sale." });
   }
 });
@@ -459,7 +467,14 @@ router.delete("/:id", async (req, res) => {
         "Sale voided successfully. Audit trail and reversing entries recorded.",
     });
   } catch (err) {
-    console.error("Sale void error:", err);
+    if (
+      err.message &&
+      (err.message.includes("found") || err.message.includes("voided"))
+    ) {
+      console.warn("Sale void validation warning:", err.message);
+    } else {
+      console.error("Sale void error:", err);
+    }
     res.status(400).json({ error: err.message || "Failed to void sale." });
   }
 });

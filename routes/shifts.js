@@ -320,7 +320,11 @@ router.get("/history", async (req, res) => {
 router.get("/analytics", async (req, res) => {
   try {
     const { startDate, endDate, shopId: queryShopId } = req.query;
-    const shopId = queryShopId || req.user.shop_id;
+    // Handle literal "undefined" string that might be sent by frontend hooks
+    const shopId =
+      queryShopId && queryShopId !== "undefined" ?
+        queryShopId
+      : req.user.shop_id;
 
     const start =
       startDate ?
@@ -489,11 +493,11 @@ router.post("/pumps", async (req, res) => {
     const nozzleUpdates = nozzles.map((n) =>
       prisma.item.updateMany({
         where: {
-          shop_id: shopId,
+          shopId: shopId,
           category: "Fuel",
           name: { contains: n.fuelType, mode: "insensitive" },
         },
-        data: { selling_price: parseFloat(n.unitPrice) },
+        data: { sellingPrice: parseFloat(n.unitPrice) },
       }),
     );
 
@@ -515,8 +519,16 @@ router.put("/pumps/:id", async (req, res) => {
 
     const result = await prisma.$transaction(async (tx) => {
       // 1. Update Pump metadata
-      const pump = await tx.pump.update({
+      const existingPump = await tx.pump.findFirst({
         where: { id, shopId },
+      });
+
+      if (!existingPump) {
+        throw new Error("Pump not found or unauthorized.");
+      }
+
+      const pump = await tx.pump.update({
+        where: { id },
         data: {
           name,
           pumpNumber: parseInt(pumpNumber),
