@@ -1,6 +1,10 @@
 const express = require("express");
 const prisma = require("../prisma/client");
-const { authenticateToken } = require("../middleware/auth");
+const {
+  authenticateToken,
+  requireAdmin,
+  requireRole,
+} = require("../middleware/auth");
 
 const router = express.Router();
 router.use(authenticateToken);
@@ -44,12 +48,8 @@ router.get("/status", async (req, res) => {
 });
 
 // POST /api/shifts/assign - Admin pre-assigns a shift to a staff member
-router.post("/assign", async (req, res) => {
+router.post("/assign", requireRole(["admin"]), async (req, res) => {
   try {
-    if (req.user.role !== "admin" && req.user.role !== "owner") {
-      return res.status(403).json({ error: "Only admins can assign shifts." });
-    }
-
     const { userId, notes } = req.body;
     const shopId = req.user.shop_id;
 
@@ -467,7 +467,7 @@ router.get("/pumps", async (req, res) => {
 });
 
 // POST /api/shifts/pumps - Create a new pump
-router.post("/pumps", async (req, res) => {
+router.post("/pumps", requireAdmin, async (req, res) => {
   try {
     const { name, pumpNumber, nozzles } = req.body;
     const shopId = req.user.shop_id;
@@ -511,7 +511,7 @@ router.post("/pumps", async (req, res) => {
 });
 
 // PUT /api/shifts/pumps/:id - Update a pump and its nozzles
-router.put("/pumps/:id", async (req, res) => {
+router.put("/pumps/:id", requireAdmin, async (req, res) => {
   try {
     const { id } = req.params;
     const { name, pumpNumber, nozzles } = req.body;
@@ -602,13 +602,13 @@ router.put("/pumps/:id", async (req, res) => {
 });
 
 // DELETE /api/shifts/pumps/:id - Soft delete a pump
-router.delete("/pumps/:id", async (req, res) => {
+router.delete("/pumps/:id", requireAdmin, async (req, res) => {
   try {
     const { id } = req.params;
     const shopId = req.user.shop_id;
 
     await prisma.$transaction([
-      prisma.pump.update({
+      prisma.pump.updateMany({
         where: { id, shopId },
         data: { isActive: false },
       }),

@@ -13,7 +13,13 @@ router.get("/summary", async (req, res) => {
     const isStaff = req.user.role === "staff";
 
     let dateFilter = {};
-    if (!isStaff && startDate && endDate) {
+    if (
+      !isStaff &&
+      startDate &&
+      endDate &&
+      startDate !== "undefined" &&
+      endDate !== "undefined"
+    ) {
       dateFilter = {
         gte: new Date(startDate),
         lte: new Date(new Date(endDate).setHours(23, 59, 59, 999)),
@@ -101,7 +107,13 @@ router.get("/hourly-sales", async (req, res) => {
     const isStaff = req.user.role === "staff";
 
     let dateFilter = {};
-    if (!isStaff && startDate && endDate) {
+    if (
+      !isStaff &&
+      startDate &&
+      endDate &&
+      startDate !== "undefined" &&
+      endDate !== "undefined"
+    ) {
       dateFilter = {
         gte: new Date(startDate),
         lte: new Date(new Date(endDate).setHours(23, 59, 59, 999)),
@@ -160,7 +172,13 @@ router.get("/top-items", async (req, res) => {
     const isStaff = req.user.role === "staff";
 
     let dateFilter = {};
-    if (!isStaff && startDate && endDate) {
+    if (
+      !isStaff &&
+      startDate &&
+      endDate &&
+      startDate !== "undefined" &&
+      endDate !== "undefined"
+    ) {
       dateFilter = {
         gte: new Date(startDate),
         lte: new Date(new Date(endDate).setHours(23, 59, 59, 999)),

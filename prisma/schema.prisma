@@ -52,6 +52,12 @@ model User {
   clerkUserId String?  @unique @map("clerk_user_id")
 
   shiftRegisters ShiftRegister[]
+  purchases      Purchase[]
+  stockMovements StockMovement[]
+  creditLedgers  CreditLedger[]
+  creditPayments CreditPayment[]
+  generalLedgers GeneralLedger[]
+  sales          Sale[]
 
   @@map("users")
 }
@@ -104,6 +110,8 @@ model Purchase {
   createdAt     DateTime @default(now()) @map("created_at")
   shopId        String?  @map("shop_id") @db.Uuid
   shop          Shop?    @relation(fields: [shopId], references: [id], onDelete: Cascade)
+  userId        String?  @map("user_id") @db.Uuid
+  user          User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
 
   @@map("purchases")
 }
@@ -140,6 +148,8 @@ model Sale {
   createdAt     DateTime @default(now()) @map("created_at")
   shopId        String?  @map("shop_id") @db.Uuid
   shop          Shop?    @relation(fields: [shopId], references: [id], onDelete: Cascade)
+  userId        String?  @map("user_id") @db.Uuid
+  user          User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
 
   customer  Customer?  @relation(fields: [customerId], references: [id])
   saleItems SaleItem[]
@@ -181,6 +191,8 @@ model StockMovement {
   createdAt     DateTime @default(now()) @map("created_at")
   shopId        String?  @map("shop_id") @db.Uuid
   shop          Shop?    @relation(fields: [shopId], references: [id], onDelete: Cascade)
+  userId        String?  @map("user_id") @db.Uuid
+  user          User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
 
   @@map("stock_movements")
 }
@@ -200,6 +212,8 @@ model CreditLedger {
   updatedAt    DateTime  @default(now()) @updatedAt @map("updated_at")
   shopId       String?   @map("shop_id") @db.Uuid
   shop         Shop?     @relation(fields: [shopId], references: [id], onDelete: Cascade)
+  userId       String?   @map("user_id") @db.Uuid
+  user         User?     @relation(fields: [userId], references: [id], onDelete: SetNull)
 
   customer Customer @relation(fields: [customerId], references: [id])
   sale     Sale     @relation(fields: [saleId], references: [id])
@@ -218,6 +232,8 @@ model CreditPayment {
   createdAt     DateTime @default(now()) @map("created_at")
   shopId        String?  @map("shop_id") @db.Uuid
   shop          Shop?    @relation(fields: [shopId], references: [id], onDelete: Cascade)
+  userId        String?  @map("user_id") @db.Uuid
+  user          User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
 
   customer     Customer     @relation(fields: [customerId], references: [id])
   creditLedger CreditLedger @relation(fields: [creditId], references: [id])
@@ -236,6 +252,8 @@ model GeneralLedger {
   createdAt   DateTime @default(now()) @map("created_at")
   shopId      String?  @map("shop_id") @db.Uuid
   shop        Shop?    @relation(fields: [shopId], references: [id], onDelete: Cascade)
+  userId      String?  @map("user_id") @db.Uuid
+  user        User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
 
   @@map("general_ledger")
 }

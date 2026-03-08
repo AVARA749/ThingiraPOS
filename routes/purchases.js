@@ -192,6 +192,7 @@ router.post("/", async (req, res) => {
         const purchase = await tx.purchase.create({
           data: {
             shopId,
+            userId: req.user.id,
             supplierId: suppId,
             itemId: itemId,
             quantity: pi.quantity,
@@ -206,6 +207,7 @@ router.post("/", async (req, res) => {
         await tx.stockMovement.create({
           data: {
             shopId,
+            userId: req.user.id,
             itemId,
             itemName,
             movementType: "IN",
@@ -223,6 +225,7 @@ router.post("/", async (req, res) => {
           data: [
             {
               shopId,
+              userId: req.user.id,
               date: datePurchased,
               description: `Inventory Asset - Purchase of ${itemName} from ${supplierInfo.name}`,
               debit: totalCost,
@@ -232,6 +235,7 @@ router.post("/", async (req, res) => {
             },
             {
               shopId,
+              userId: req.user.id,
               date: datePurchased,
               description: `Cash Asset - Purchase of ${itemName} from ${supplierInfo.name}`,
               debit: 0,

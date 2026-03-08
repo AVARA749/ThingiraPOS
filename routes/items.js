@@ -154,6 +154,7 @@ router.post("/", async (req, res) => {
       await prisma.stockMovement.create({
         data: {
           shopId,
+          userId: req.user.id,
           itemId: item.id,
           itemName: name,
           movementType: "IN",
@@ -235,6 +236,7 @@ router.put("/:id", async (req, res) => {
       await prisma.stockMovement.create({
         data: {
           shopId,
+          userId: req.user.id,
           itemId: itemId,
           itemName: name || existing.name,
           movementType: qtyDiff > 0 ? "IN" : "OUT",

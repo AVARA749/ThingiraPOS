@@ -1,8 +1,10 @@
 const express = require("express");
 const prisma = require("../prisma/client");
-const { authenticateToken } = require("../middleware/auth");
+const { authenticateToken, requireAdmin } = require("../middleware/auth");
 const router = express.Router();
+
 router.use(authenticateToken);
+router.use(requireAdmin); // Restrict all reports strictly to admins
 
 // GET /api/reports/daily
 router.get("/daily", async (req, res) => {

@@ -122,6 +122,7 @@ router.post("/", async (req, res) => {
       const sale = await tx.sale.create({
         data: {
           shopId,
+          userId: req.user.id,
           receiptNumber,
           customerId,
           customerName: customer_name || "Walk-in Customer",
@@ -158,6 +159,7 @@ router.post("/", async (req, res) => {
         await tx.stockMovement.create({
           data: {
             shopId,
+            userId: req.user.id,
             itemId: li.itemId,
             itemName: li.itemName,
             movementType: "OUT",
@@ -175,6 +177,7 @@ router.post("/", async (req, res) => {
           data: [
             {
               shopId,
+              userId: req.user.id,
               date: new Date(),
               description: `Cost of Goods Sold - for ${li.itemName} (Receipt: ${receiptNumber})`,
               debit: cogsAmount,
@@ -184,6 +187,7 @@ router.post("/", async (req, res) => {
             },
             {
               shopId,
+              userId: req.user.id,
               date: new Date(),
               description: `Inventory - for ${li.itemName} (Receipt: ${receiptNumber})`,
               debit: 0,
@@ -206,6 +210,7 @@ router.post("/", async (req, res) => {
         data: [
           {
             shopId,
+            userId: req.user.id,
             date: new Date(),
             description: `${paymentTypeDesc} - Sale Revenue (Receipt: ${receiptNumber}, Method: ${payment_type})`,
             debit: totalAmount,
@@ -215,6 +220,7 @@ router.post("/", async (req, res) => {
           },
           {
             shopId,
+            userId: req.user.id,
             date: new Date(),
             description: `Sales Revenue - Sale Revenue (Receipt: ${receiptNumber}, Method: ${payment_type})`,
             debit: 0,
@@ -230,6 +236,7 @@ router.post("/", async (req, res) => {
         await tx.creditLedger.create({
           data: {
             shopId,
+            userId: req.user.id,
             customerId,
             customerName: customer_name,
             saleId: sale.id,
@@ -369,6 +376,7 @@ router.delete("/:id", async (req, res) => {
         await tx.stockMovement.create({
           data: {
             shopId,
+            userId: req.user.id,
             itemId: si.itemId,
             itemName: si.itemName,
             movementType: "RETURN",
@@ -386,6 +394,7 @@ router.delete("/:id", async (req, res) => {
           data: [
             {
               shopId,
+              userId: req.user.id,
               date: new Date(),
               description: `Inventory - Stock Restored from Void (Item: ${si.itemName})`,
               debit: cogsAmount,
@@ -395,6 +404,7 @@ router.delete("/:id", async (req, res) => {
             },
             {
               shopId,
+              userId: req.user.id,
               date: new Date(),
               description: `Cost of Goods Sold - Stock Restored from Void (Item: ${si.itemName})`,
               debit: 0,
@@ -417,6 +427,7 @@ router.delete("/:id", async (req, res) => {
         data: [
           {
             shopId,
+            userId: req.user.id,
             date: new Date(),
             description: `Sales Revenue - Sale Voided (Receipt: ${sale.receiptNumber})`,
             debit: sale.totalAmount,
@@ -426,6 +437,7 @@ router.delete("/:id", async (req, res) => {
           },
           {
             shopId,
+            userId: req.user.id,
             date: new Date(),
             description: `${paymentTypeDesc} - Sale Voided (Receipt: ${sale.receiptNumber})`,
             debit: 0,

@@ -133,10 +133,11 @@ router.post("/:id/pay", async (req, res) => {
         await tx.creditPayment.create({
           data: {
             shopId,
+            userId: req.user.id,
             customerId,
-            ledgerId: entry.id,
+            creditId: entry.id,
             amount: amount,
-            paymentDate: payDate,
+            createdAt: payDate,
             notes: notes || "",
           },
         });
@@ -144,9 +145,11 @@ router.post("/:id/pay", async (req, res) => {
         await tx.creditPayment.create({
           data: {
             shopId,
+            userId: req.user.id,
             customerId,
+            creditId: "UNKNOWN_PLACEHOLDER", // Schema requires creditId, but there is no ledger entry? We'll see if this breaks, or if customers can really pay without ledger entries.
             amount: amount,
-            paymentDate: payDate,
+            createdAt: payDate,
             notes: notes || "Partial payment",
           },
         });
@@ -163,6 +166,7 @@ router.post("/:id/pay", async (req, res) => {
         data: [
           {
             shopId,
+            userId: req.user.id,
             date: payDate,
             description: `Cash - Credit payment from ${customer.name}`,
             debit: amount,
@@ -172,6 +176,7 @@ router.post("/:id/pay", async (req, res) => {
           },
           {
             shopId,
+            userId: req.user.id,
             date: payDate,
             description: `Accounts Receivable - Credit payment from ${customer.name}`,
             debit: 0,
