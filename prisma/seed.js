@@ -30,7 +30,40 @@ const USERS = [
     email: "mercylabs66@gmail.com",
     fullName: "Mercy Wanjiku",
     phone: "0722000222",
-    role: "staff",
+    role: "cashier",
+  },
+  {
+    username: "james",
+    email: "jameskariuki@gmail.com",
+    fullName: "James Kariuki",
+    phone: "0722000333",
+    role: "fuel_station_attendant",
+  },
+];
+
+// Second shop for onemoreavara@gmail.com
+const SHOP_2_NAME = "Thingira Station West";
+const USERS_2 = [
+  {
+    username: "admin2",
+    email: "onemoreavara@gmail.com",
+    fullName: "Ava Mwangi",
+    phone: "0723000111",
+    role: "admin",
+  },
+  {
+    username: "faith",
+    email: "faithwambui@gmail.com",
+    fullName: "Faith Wambui",
+    phone: "0723000222",
+    role: "cashier",
+  },
+  {
+    username: "dennis",
+    email: "denniskiprop@gmail.com",
+    fullName: "Dennis Kiprop",
+    phone: "0723000333",
+    role: "fuel_station_attendant",
   },
 ];
 
@@ -54,7 +87,34 @@ const PUMPS = [
   },
 ];
 
-// 3. SUPPLIERS
+// Pumps for Shop 2 (Thingira Station West)
+const PUMPS_2 = [
+  {
+    name: "Pump Island 1",
+    pumpNumber: 101,
+    nozzles: [
+      { nozzleNumber: 1, fuelType: "petrol", unitPrice: 179.5 },
+      { nozzleNumber: 2, fuelType: "diesel", unitPrice: 164.0 },
+    ],
+  },
+  {
+    name: "Pump Island 2",
+    pumpNumber: 102,
+    nozzles: [
+      { nozzleNumber: 1, fuelType: "petrol", unitPrice: 179.5 },
+      { nozzleNumber: 2, fuelType: "kerosene", unitPrice: 147.0 },
+    ],
+  },
+];
+
+// 3. SHIFT SLOTS
+const SHIFT_SLOTS = [
+  { name: "Morning Shift", startTime: "06:00", endTime: "14:00" },
+  { name: "Afternoon Shift", startTime: "14:00", endTime: "22:00" },
+  { name: "Night Shift", startTime: "22:00", endTime: "06:00" },
+];
+
+// 4. SUPPLIERS
 const SUPPLIERS = [
   {
     name: "Bidco Africa Ltd",
@@ -90,6 +150,34 @@ const SUPPLIERS = [
 
 // 4. ITEMS
 const ITEMS = [
+  // Fuel (for inventory tracking)
+  {
+    name: "Petrol",
+    buyingPrice: 150.0,
+    sellingPrice: 177.5,
+    quantity: 5000,
+    minStockLevel: 1000,
+    category: "Fuel",
+    barcode: "6191000001001",
+  },
+  {
+    name: "Diesel",
+    buyingPrice: 140.0,
+    sellingPrice: 162.0,
+    quantity: 5000,
+    minStockLevel: 1000,
+    category: "Fuel",
+    barcode: "6191000001002",
+  },
+  {
+    name: "Kerosene",
+    buyingPrice: 120.0,
+    sellingPrice: 145.0,
+    quantity: 2000,
+    minStockLevel: 500,
+    category: "Fuel",
+    barcode: "6191000001003",
+  },
   // Food Staples
   {
     name: "Jogoo Maize Flour 2kg",
@@ -264,7 +352,7 @@ async function seed() {
   console.log("🌱 Starting ThingiraPOS Seed (Kenyan Context)...\n");
 
   try {
-    // 1. SETUP SHOP
+    // 1. SETUP SHOP 1 - Main Shop
     let shop = await prisma.shop.findFirst({
       where: { name: SHOP_NAME },
     });
@@ -283,8 +371,27 @@ async function seed() {
       console.log(`🏪 Using existing shop: ${shop.name} (${shop.id})\n`);
     }
 
-    // 2. SYNC USERS
-    console.log("👤 Syncing users...");
+    // 2. SETUP SHOP 2 - Station West (for onemoreavara@gmail.com)
+    let shop2 = await prisma.shop.findFirst({
+      where: { name: SHOP_2_NAME },
+    });
+
+    if (!shop2) {
+      console.log("🏪 Creating second shop...");
+      shop2 = await prisma.shop.create({
+        data: {
+          name: SHOP_2_NAME,
+          address: "Mombasa Road, Athi River",
+          phone: "0723000111",
+        },
+      });
+      console.log(`   ${shop2.name} (${shop2.id})\n`);
+    } else {
+      console.log(`🏪 Using existing shop: ${shop2.name} (${shop2.id})\n`);
+    }
+
+    // 3. SYNC USERS FOR SHOP 1
+    console.log("👤 Syncing users for Shop 1...");
     for (const u of USERS) {
       await prisma.user.upsert({
         where: { username: u.username },
@@ -307,8 +414,62 @@ async function seed() {
     }
     console.log("");
 
-    // 3. SYNC PUMPS & NOZZLES
-    console.log("⛽ Syncing pumps & nozzles...");
+    // 4. SYNC USERS FOR SHOP 2
+    console.log("👤 Syncing users for Shop 2...");
+    for (const u of USERS_2) {
+      // Check if email already exists in another user's record
+      const existingEmail = await prisma.user.findUnique({
+        where: { email: u.email },
+      });
+      
+      if (existingEmail) {
+        // Update the existing user's shop association
+        await prisma.user.update({
+          where: { id: existingEmail.id },
+          data: {
+            role: u.role,
+            shopId: shop2.id,
+            shopName: shop2.name,
+            username: u.username,
+          },
+        });
+        console.log(`   Updated ${u.role}: ${u.fullName} (${u.username}) - reassigned to Shop 2`);
+      } else {
+        // Check if username exists
+        const existingUser = await prisma.user.findUnique({
+          where: { username: u.username },
+        });
+        
+        if (existingUser) {
+          await prisma.user.update({
+            where: { username: u.username },
+            data: {
+              email: u.email,
+              fullName: u.fullName,
+              phone: u.phone,
+              role: u.role,
+              shopId: shop2.id,
+              shopName: shop2.name,
+            },
+          });
+          console.log(`   Updated ${u.role}: ${u.fullName} (${u.username})`);
+        } else {
+          await prisma.user.create({
+            data: {
+              ...u,
+              shopId: shop2.id,
+              shopName: shop2.name,
+              clerkUserId: null,
+            },
+          });
+          console.log(`   ${u.role}: ${u.fullName} (${u.username})`);
+        }
+      }
+    }
+    console.log("");
+
+    // 5. SYNC PUMPS & NOZZLES FOR SHOP 1
+    console.log("⛽ Syncing pumps & nozzles for Shop 1...");
     const createdNozzles = [];
     for (const p of PUMPS) {
       const existingPump = await prisma.pump.findFirst({
@@ -344,7 +505,94 @@ async function seed() {
     }
     console.log("");
 
-    // 4. SYNC SUPPLIERS
+    // 6. SYNC PUMPS & NOZZLES FOR SHOP 2
+    console.log("⛽ Syncing pumps & nozzles for Shop 2...");
+    const createdNozzles2 = [];
+    for (const p of PUMPS_2) {
+      const existingPump = await prisma.pump.findFirst({
+        where: { pumpNumber: p.pumpNumber },
+        include: { nozzles: true },
+      });
+
+      let pumpId2;
+      if (!existingPump) {
+        const newPump = await prisma.pump.create({
+          data: {
+            name: p.name,
+            pumpNumber: p.pumpNumber,
+            shopId: shop2.id,
+            nozzles: {
+              create: p.nozzles.map((n) => ({
+                nozzleNumber: n.nozzleNumber,
+                fuelType: n.fuelType,
+                unitPrice: n.unitPrice,
+                isActive: true,
+              })),
+            },
+          },
+          include: { nozzles: true },
+        });
+        pumpId2 = newPump.id;
+        createdNozzles2.push(...newPump.nozzles);
+        console.log(`   Created Pump ${p.pumpNumber}: ${p.name}`);
+      } else {
+        pumpId2 = existingPump.id;
+        createdNozzles2.push(...existingPump.nozzles);
+      }
+    }
+    console.log("");
+
+    // 7. SYNC SHIFT SLOTS FOR SHOP 1
+    console.log("🕐 Syncing shift slots for Shop 1...");
+    const shiftSlotsMap = {};
+    for (const slot of SHIFT_SLOTS) {
+      const existing = await prisma.shift.findFirst({
+        where: { name: slot.name, shopId: shop.id },
+      });
+      let dbSlot;
+      if (!existing) {
+        dbSlot = await prisma.shift.create({
+          data: {
+            name: slot.name,
+            startTime: slot.startTime,
+            endTime: slot.endTime,
+            shopId: shop.id,
+          },
+        });
+      } else {
+        dbSlot = existing;
+      }
+      shiftSlotsMap[dbSlot.name] = dbSlot;
+      console.log(`   Shift slot: ${slot.name} (${slot.startTime} - ${slot.endTime})`);
+    }
+    console.log("");
+
+    // 8. SYNC SHIFT SLOTS FOR SHOP 2
+    console.log("🕐 Syncing shift slots for Shop 2...");
+    const shiftSlotsMap2 = {};
+    for (const slot of SHIFT_SLOTS) {
+      const existing = await prisma.shift.findFirst({
+        where: { name: slot.name, shopId: shop2.id },
+      });
+      let dbSlot;
+      if (!existing) {
+        dbSlot = await prisma.shift.create({
+          data: {
+            name: slot.name,
+            startTime: slot.startTime,
+            endTime: slot.endTime,
+            shopId: shop2.id,
+          },
+        });
+      } else {
+        dbSlot = existing;
+      }
+      shiftSlotsMap2[dbSlot.name] = dbSlot;
+      console.log(`   Shift slot: ${slot.name} (${slot.startTime} - ${slot.endTime})`);
+    }
+    console.log("");
+
+    // 5. SYNC SUPPLIERS
     console.log("🏭 Syncing suppliers...");
     for (const s of SUPPLIERS) {
       const existing = await prisma.supplier.findFirst({
@@ -462,10 +710,14 @@ async function seed() {
       const shiftEndTime = new Date(yesterday);
       shiftEndTime.setHours(18, 0, 0, 0); // End at 6 PM
 
+      // Link to Morning Shift slot
+      const morningSlot = shiftSlotsMap["Morning Shift"];
+
       const shift = await prisma.shiftRegister.create({
         data: {
           userId: staffUser.id,
           shopId: shop.id,
+          shiftId: morningSlot?.id, // Link to shift slot
           startTime: yesterday,
           endTime: shiftEndTime,
           startCash: 15000.0,

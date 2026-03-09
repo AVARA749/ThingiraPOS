@@ -36,6 +36,8 @@ model Shop {
 enum UserRole {
   admin
   staff
+  cashier
+  fuel_station_attendant
 }
 
 model User {
