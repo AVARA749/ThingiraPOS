@@ -51,6 +51,15 @@ router.post("/", async (req, res) => {
         .json({ error: "Payment type must be cash, credit, mpesa, or sacco." });
     }
 
+    if (
+      payment_type === "credit" &&
+      (!customer_name || customer_name === "Walk-in Customer")
+    ) {
+      return res
+        .status(400)
+        .json({ error: "Customer name is required for credit sales." });
+    }
+
     const receiptNumber = await generateReceiptNumber(shopId);
 
     // Perform everything in a single transaction
