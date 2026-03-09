@@ -41,6 +41,9 @@ const endpoints = [
   { method: 'GET', path: '/reports/inventory', name: 'reports.inventory' },
   { method: 'GET', path: '/shifts/active', name: 'shifts.active' },
   { method: 'POST', path: '/shifts/start', name: 'shifts.start', body: { openingCash: 1000 } },
+  // Pump management
+  { method: 'GET', path: '/shifts/pumps', name: 'shifts.pumps.list' },
+  { method: 'POST', path: '/shifts/pumps', name: 'shifts.pumps.create', body: { name: 'Pump Test', pumpNumber: 664, nozzles: [{ nozzleNumber: 1, fuelType: 'petrol', unitPrice: 54, lastReading: 34 }, { nozzleNumber: 2, fuelType: 'petrol', unitPrice: 34, lastReading: 34 }] } },
 ];
 
 async function testEndpoint(endpoint) {
