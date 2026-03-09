@@ -87,23 +87,35 @@ router.post("/", async (req, res) => {
 
       // 2. Handle Customer
       let customerId = null;
-      if (customer_name) {
-        const customerOrConditions = [
-          { name: { equals: customer_name, mode: "insensitive" } },
-        ];
-        if (customer_phone) {
-          customerOrConditions.push({ phone: customer_phone });
-        }
+      const isWalkIn =
+        (!customer_name || customer_name === "Walk-in Customer") &&
+        !customer_phone;
 
-        let customer = await tx.customer.findFirst({
-          where: {
-            shopId: shopId,
-            OR: customerOrConditions,
-          },
-        });
+      if (!isWalkIn) {
+        // Build resilient conditions
+        const searchConditions = [];
+        const providedName =
+          customer_name === "Walk-in Customer" ? null : customer_name;
+
+        if (customer_phone) searchConditions.push({ phone: customer_phone });
+        if (providedName)
+          searchConditions.push({
+            name: { equals: providedName, mode: "insensitive" },
+          });
+
+        let customer = null;
+        if (searchConditions.length > 0) {
+          customer = await tx.customer.findFirst({
+            where: {
+              shopId: shopId,
+              OR: searchConditions,
+            },
+          });
+        }
 
         if (customer) {
           customerId = customer.id;
+          // Sync new phone numbers to existing customers safely
           if (customer_phone && customer.phone !== customer_phone) {
             await tx.customer.update({
               where: { id: customer.id },
@@ -111,10 +123,11 @@ router.post("/", async (req, res) => {
             });
           }
         } else {
+          // Create the new tracking customer
           const newCustomer = await tx.customer.create({
             data: {
               shopId,
-              name: customer_name,
+              name: providedName || "Unknown Customer",
               phone: customer_phone || "",
             },
           });
