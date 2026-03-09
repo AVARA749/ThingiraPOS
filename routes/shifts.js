@@ -30,8 +30,18 @@ router.get("/status", async (req, res) => {
       },
     });
 
+    // Get all nozzles with their baseline readings
+    const pumps = await prisma.pump.findMany({
+      where: { shopId, isActive: true },
+      include: {
+        nozzles: {
+          where: { isActive: true },
+        },
+      },
+    });
+
     if (shift) {
-      return res.json({ isOpen: true, shift });
+      return res.json({ isOpen: true, shift, pumps });
     }
 
     // If no open shift, check for assigned shifts
@@ -47,18 +57,72 @@ router.get("/status", async (req, res) => {
   }
 });
 
+// GET /api/shifts/slots - Get all shift slot definitions
+router.get("/slots", async (req, res) => {
+  try {
+    const shopId = req.user.shop_id;
+    const slots = await prisma.shift.findMany({
+      where: { shopId },
+      orderBy: { startTime: "asc" },
+    });
+    res.json(slots);
+  } catch (err) {
+    console.error("Fetch slots error:", err);
+    res.status(500).json({ error: "Failed to fetch shift slots." });
+  }
+});
+
+// POST /api/shifts/slots - Create shift slot
+router.post("/slots", requireRole(["admin"]), async (req, res) => {
+  try {
+    const { name, startTime, endTime } = req.body;
+    const shopId = req.user.shop_id;
+
+    const slot = await prisma.shift.create({
+      data: {
+        name,
+        startTime,
+        endTime,
+        shopId,
+      },
+    });
+    res.status(201).json(slot);
+  } catch (err) {
+    console.error("Create slot error:", err);
+    res.status(500).json({ error: "Failed to create shift slot." });
+  }
+});
+
+// DELETE /api/shifts/slots/:id - Delete shift slot
+router.delete("/slots/:id", requireRole(["admin"]), async (req, res) => {
+  try {
+    const { id } = req.params;
+    await prisma.shift.delete({
+      where: { id },
+    });
+    res.json({ message: "Slot deleted." });
+  } catch (err) {
+    console.error("Delete slot error:", err);
+    res.status(500).json({ error: "Failed to delete shift slot." });
+  }
+});
+
 // POST /api/shifts/assign - Admin pre-assigns a shift to a staff member
 router.post("/assign", requireRole(["admin"]), async (req, res) => {
   try {
-    const { userId, notes } = req.body;
+    const { userId, notes, shiftId } = req.body;
     const shopId = req.user.shop_id;
 
     const shift = await prisma.shiftRegister.create({
       data: {
         shopId,
         userId,
+        shiftId,
         notes: notes || "",
         status: "assigned",
+      },
+      include: {
+        shift: true,
       },
     });
 
@@ -204,23 +268,21 @@ router.post("/close", async (req, res) => {
     }
 
     const result = await prisma.$transaction(async (tx) => {
-      // Calculate expected cash from sales during this shift
+      // Calculate expected cash from sales specifically linked to this shift
       const salesAggregation = await tx.sale.aggregate({
         _sum: { totalAmount: true },
         where: {
-          shopId,
-          createdAt: { gte: shift.startTime },
+          shiftId: shift.id,
           status: "completed",
         },
       });
 
-      // Get payment type breakdown
+      // Get payment type breakdown linked to shift
       const cashSalesResult = await tx.sale.groupBy({
         by: ["paymentType"],
         _sum: { totalAmount: true },
         where: {
-          shopId,
-          createdAt: { gte: shift.startTime },
+          shiftId: shift.id,
           status: "completed",
         },
       });
@@ -263,6 +325,44 @@ router.post("/close", async (req, res) => {
                 amountSold,
               },
             });
+
+            // Update baseline meter for next shift
+            await tx.nozzle.update({
+              where: { id: reading.nozzleId },
+              data: { lastReading: parseFloat(reading.closingReading) },
+            });
+
+            // INTEGRATION: Decrement Fuel Inventory
+            const fuelItem = await tx.item.findFirst({
+              where: {
+                shopId,
+                category: { equals: "Fuel", mode: "insensitive" },
+                name: { equals: nozzle.fuelType, mode: "insensitive" },
+              },
+            });
+
+            if (fuelItem) {
+              const updatedItem = await tx.item.update({
+                where: { id: fuelItem.id },
+                data: { quantity: { decrement: volumeSold } },
+              });
+
+              // Log Stock Movement
+              await tx.stockMovement.create({
+                data: {
+                  shopId,
+                  userId,
+                  itemId: fuelItem.id,
+                  itemName: fuelItem.name,
+                  movementType: "OUT",
+                  quantity: volumeSold,
+                  balanceAfter: updatedItem.quantity,
+                  referenceType: "shift_dispense",
+                  referenceId: shift.id,
+                  notes: `Dispensed via Pump - Shift ${shift.id}`,
+                },
+              });
+            }
           }
         }
       }
@@ -299,6 +399,7 @@ router.get("/history", async (req, res) => {
       where: { shopId },
       include: {
         user: { select: { fullName: true } },
+        shift: true,
       },
       orderBy: { startTime: "desc" },
       take: 100,
@@ -307,7 +408,8 @@ router.get("/history", async (req, res) => {
     res.json(
       shifts.map((s) => ({
         ...s,
-        user_name: s.user?.fullName || "Unknown",
+        userName: s.user?.fullName || "Unknown",
+        user_name: s.user?.fullName || "Unknown", // Temporary compatibility
       })),
     );
   } catch (err) {
@@ -649,6 +751,104 @@ router.get("/:id", async (req, res) => {
   } catch (err) {
     console.error("Get shift error:", err);
     res.status(500).json({ error: "Failed to fetch shift." });
+  }
+});
+
+// POST /api/shifts/nozzles/:id/calibrate - Admin manually sets meter baseline
+router.post("/nozzles/:id/calibrate", requireAdmin, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { lastReading, notes } = req.body;
+    const shopId = req.user.shop_id;
+
+    const nozzle = await prisma.nozzle.updateMany({
+      where: { id, pump: { shopId } },
+      data: { lastReading: parseFloat(lastReading) },
+    });
+
+    if (nozzle.count === 0) {
+      return res
+        .status(404)
+        .json({ error: "Nozzle not found or unauthorized." });
+    }
+
+    // Log the calibration in stock movement or a specific audit log if needed
+    // For now, we'll just return success
+    res.json({ message: "Nozzle calibrated successfully.", lastReading });
+  } catch (err) {
+    console.error("Calibrate nozzle error:", err);
+    res.status(500).json({ error: "Failed to calibrate nozzle." });
+  }
+});
+
+// POST /api/shifts/refill - Admin records a fuel delivery/refill
+router.post("/refill", requireAdmin, async (req, res) => {
+  try {
+    const { fuelType, volume, totalCost, supplierId, notes } = req.body;
+    const shopId = req.user.shop_id;
+    const userId = req.user.id;
+
+    const result = await prisma.$transaction(async (tx) => {
+      // 1. Find the fuel item
+      const fuelItem = await tx.item.findFirst({
+        where: {
+          shopId,
+          category: { equals: "Fuel", mode: "insensitive" },
+          name: { equals: fuelType, mode: "insensitive" },
+        },
+      });
+
+      if (!fuelItem) {
+        throw new Error(`Fuel item for "${fuelType}" not found in inventory.`);
+      }
+
+      // 2. Increment quantity
+      const updatedItem = await tx.item.update({
+        where: { id: fuelItem.id },
+        data: { quantity: { increment: parseFloat(volume) } },
+      });
+
+      // 3. Log Stock Movement
+      await tx.stockMovement.create({
+        data: {
+          shopId,
+          userId,
+          itemId: fuelItem.id,
+          itemName: fuelItem.name,
+          movementType: "IN",
+          quantity: parseFloat(volume),
+          balanceAfter: updatedItem.quantity,
+          referenceType: "refill",
+          notes: notes || `Bulk Fuel Refill - ${fuelType}`,
+        },
+      });
+
+      // 4. Create an Expense or Ledger entry if cost is provided
+      if (totalCost && parseFloat(totalCost) > 0) {
+        await tx.generalLedger.create({
+          data: {
+            shopId,
+            userId,
+            date: new Date(),
+            description: `Fuel Refill Purchase - ${fuelType} (${volume}L)`,
+            debit: parseFloat(totalCost),
+            credit: 0,
+            balance: parseFloat(totalCost),
+            reference: "bulk_refill",
+          },
+        });
+      }
+
+      return updatedItem;
+    });
+
+    res.json({
+      message: "Fuel refill recorded successfully.",
+      inventory: result,
+    });
+  } catch (err) {
+    console.error("Refill error:", err);
+    res.status(500).json({ error: err.message || "Failed to record refill." });
   }
 });
 

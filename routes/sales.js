@@ -144,11 +144,24 @@ router.post("/", async (req, res) => {
         }
       }
 
-      // 3. Create Sale
+      // 3. Enforce active shift
+      const activeShift = await tx.shiftRegister.findFirst({
+        where: { shopId, userId: req.user.id, status: "open" },
+        orderBy: { startTime: "desc" },
+      });
+
+      if (!activeShift) {
+        throw new Error(
+          "No active shift found. Please start a shift before making a sale.",
+        );
+      }
+
+      // 4. Create Sale
       const sale = await tx.sale.create({
         data: {
           shopId,
           userId: req.user.id,
+          shiftId: activeShift.id,
           receiptNumber,
           customerId,
           customerName: customer_name || "Walk-in Customer",

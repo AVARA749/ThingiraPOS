@@ -28,6 +28,7 @@ model Shop {
   generalLedgers    GeneralLedger[]
   shiftRegisters   ShiftRegister[]
   pumps             Pump[]
+  shifts            Shift[]
 
   @@map("shops")
 }
@@ -155,6 +156,9 @@ model Sale {
   saleItems SaleItem[]
   creditLedgers CreditLedger[]
 
+  shiftId       String?    @map("shift_id") @db.Uuid
+  shift         ShiftRegister? @relation(fields: [shiftId], references: [id])
+
   @@unique([shopId, receiptNumber])
   @@map("sales")
 }
@@ -260,12 +264,28 @@ model GeneralLedger {
 
 // ============== FUEL STATION MODELS ==============
 
+model Shift {
+  id        String   @id @default(uuid()) @db.Uuid
+  name      String   // e.g. Morning, Night
+  startTime String?  @map("start_time") // HH:mm
+  endTime   String?  @map("end_time")   // HH:mm
+  shopId    String?  @map("shop_id") @db.Uuid
+  shop      Shop?    @relation(fields: [shopId], references: [id], onDelete: Cascade)
+  createdAt DateTime @default(now()) @map("created_at")
+
+  shiftRegisters ShiftRegister[]
+
+  @@map("shifts")
+}
+
 model ShiftRegister {
   id        String    @id @default(uuid()) @db.Uuid
   userId    String    @map("user_id") @db.Uuid
   user      User      @relation(fields: [userId], references: [id])
   startTime DateTime? @map("start_time")
   endTime   DateTime? @map("end_time")
+  shiftId   String?   @map("shift_id") @db.Uuid
+  shift     Shift?    @relation(fields: [shiftId], references: [id])
   startCash Decimal?  @map("start_cash") @db.Decimal(10, 2)
   endCash   Decimal?  @map("end_cash") @db.Decimal(10, 2)
   status    String    @default("assigned")
@@ -283,6 +303,7 @@ model ShiftRegister {
   totalMpesaSales  Decimal?  @map("total_mpesa_sales") @db.Decimal(10, 2)
 
   nozzleShiftReadings NozzleShiftReading[]
+  sales               Sale[]
 
   @@map("shift_registers")
 }
@@ -321,6 +342,8 @@ model Nozzle {
   isActive  Boolean   @default(true) @map("is_active")
   createdAt DateTime  @default(now()) @map("created_at")
   updatedAt DateTime  @default(now()) @updatedAt @map("updated_at")
+
+  lastReading Decimal   @default(0) @map("last_reading") @db.Decimal(12, 2)
 
   nozzleShiftReadings NozzleShiftReading[]
 
