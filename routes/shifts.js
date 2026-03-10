@@ -421,12 +421,17 @@ router.get("/history", async (req, res) => {
 // GET /api/shifts/analytics - Dashboard analytics for shift metrics
 router.get("/analytics", async (req, res) => {
   try {
-    const { startDate, endDate, shopId: queryShopId } = req.query;
+    const { startDate, endDate, shopId: queryShopId, fuelTypes } = req.query;
     // Handle literal "undefined" string that might be sent by frontend hooks
     const shopId =
       queryShopId && queryShopId !== "undefined" ?
         queryShopId
       : req.user.shop_id;
+
+    // Parse fuelTypes if provided (comma-separated string)
+    const fuelTypesArray = fuelTypes
+      ? (typeof fuelTypes === "string" ? fuelTypes.split(",") : fuelTypes)
+      : [];
 
     const start =
       startDate ?
@@ -450,27 +455,37 @@ router.get("/analytics", async (req, res) => {
       orderBy: { startTime: "desc" },
     });
 
+    // Filter by fuel types if specified
+    const filteredShifts = fuelTypesArray.length > 0
+      ? shifts.filter((s) =>
+          s.nozzleShiftReadings.some(
+            (r) =>
+              r.nozzle && fuelTypesArray.includes(r.nozzle.fuelType.toLowerCase()),
+          )
+        )
+      : shifts;
+
     // Calculate totals
-    const totalCashSales = shifts.reduce(
+    const totalCashSales = filteredShifts.reduce(
       (sum, s) => sum + (parseFloat(s.totalCashSales) || 0),
       0,
     );
-    const totalCardSales = shifts.reduce(
+    const totalCardSales = filteredShifts.reduce(
       (sum, s) => sum + (parseFloat(s.totalCardSales) || 0),
       0,
     );
-    const totalMpesaSales = shifts.reduce(
+    const totalMpesaSales = filteredShifts.reduce(
       (sum, s) => sum + (parseFloat(s.totalMpesaSales) || 0),
       0,
     );
-    const totalVariance = shifts.reduce(
+    const totalVariance = filteredShifts.reduce(
       (sum, s) => sum + (parseFloat(s.variance) || 0),
       0,
     );
 
     // Get fuel distribution from nozzle readings
     const fuelDistribution = {};
-    for (const shift of shifts) {
+    for (const shift of filteredShifts) {
       for (const reading of shift.nozzleShiftReadings) {
         const fuelType = reading.nozzle?.fuelType || "petrol";
         if (!fuelDistribution[fuelType]) {
@@ -485,7 +500,7 @@ router.get("/analytics", async (req, res) => {
 
     // Calculate daily sales trends
     const dailySales = {};
-    for (const shift of shifts) {
+    for (const shift of filteredShifts) {
       const date = new Date(shift.startTime).toISOString().split("T")[0];
       if (!dailySales[date]) {
         dailySales[date] = { petrol: 0, diesel: 0, kerosene: 0, total: 0 };
@@ -500,7 +515,7 @@ router.get("/analytics", async (req, res) => {
     }
 
     // Variance data for bar chart
-    const varianceData = shifts.map((s) => ({
+    const varianceData = filteredShifts.map((s) => ({
       shiftId: s.id,
       cashierName: s.user?.fullName || "Unknown",
       date: new Date(s.startTime).toISOString().split("T")[0],
