@@ -19,6 +19,7 @@ const shiftRoutes = require("./routes/shifts");
 const shopRoutes = require("./routes/shops");
 const staffRoutes = require("./routes/staff");
 const webhookRoutes = require("./routes/webhooks");
+const tankRoutes = require("./routes/tanks");
 
 const app = express();
 const PORT = process.env.PORT || 5000;
@@ -99,6 +100,7 @@ app.use("/api/reports", reportRoutes);
 app.use("/api/shifts", shiftRoutes);
 app.use("/api/shops", shopRoutes);
 app.use("/api/staff", staffRoutes);
+app.use("/api/tanks", tankRoutes);
 
 // Health checks
 app.get("/api/health", (req, res) => {
