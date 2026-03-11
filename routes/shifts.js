@@ -35,7 +35,26 @@ router.get("/status", async (req, res) => {
     });
 
     if (shift) {
-      return res.json({ isOpen: true, shift, pumps });
+      // Compute fuel aggregates server-side
+      const readings = shift.pumpShiftReadings || [];
+      const totalVolumeSold = readings.reduce(
+        (sum, r) => sum + parseFloat(r.volumeSold ?? 0),
+        0,
+      );
+      const totalFuelRevenue = readings.reduce(
+        (sum, r) => sum + parseFloat(r.amountSold ?? 0),
+        0,
+      );
+
+      return res.json({
+        isOpen: true,
+        shift: {
+          ...shift,
+          totalVolumeSold,
+          totalFuelRevenue,
+        },
+        pumps,
+      });
     }
 
     // If no open shift, check for assigned shifts
@@ -403,13 +422,20 @@ router.get("/history", async (req, res) => {
       take: 100,
     });
 
-    res.json(
-      shifts.map((s) => ({
-        ...s,
-        userName: s.user?.fullName || "Unknown",
-        user_name: s.user?.fullName || "Unknown", // Temporary compatibility
-      })),
-    );
+    const mapped = shifts.map((s) => ({
+      ...s,
+      userName: s.user?.fullName || "Unknown",
+      user_name: s.user?.fullName || "Unknown", // Temporary compatibility
+    }));
+
+    // Pre-compute aggregates so the client doesn't need to reduce
+    const summary = {
+      shiftCount: mapped.length,
+      totalVariance: mapped.reduce((sum, s) => sum + parseFloat(s.variance || 0), 0),
+      totalRevenue: mapped.reduce((sum, s) => sum + parseFloat(s.expectedRevenue || 0), 0),
+    };
+
+    res.json({ shifts: mapped, summary });
   } catch (err) {
     console.error("Shift history error:", err);
     res.status(500).json({ error: "Failed to fetch shift history." });
