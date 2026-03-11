@@ -107,28 +107,34 @@ const SUPPLIERS = [
   },
 ];
 
+const TANKS = [
+  {
+    name: "Main Petrol Tank",
+    fuelType: "petrol",
+    currentPrice: 177.5,
+    capacity: 50000,
+    currentLevel: 50000,
+    minStockLevel: 5000,
+  },
+  {
+    name: "Main Diesel Tank",
+    fuelType: "diesel",
+    currentPrice: 162.0,
+    capacity: 60000,
+    currentLevel: 60000,
+    minStockLevel: 5000,
+  },
+  {
+    name: "Main Kerosene Tank",
+    fuelType: "kerosene",
+    currentPrice: 110.0,
+    capacity: 20000,
+    currentLevel: 20000,
+    minStockLevel: 2000,
+  },
+];
+
 const ITEMS = [
-  // Fuel
-  {
-    name: "Petrol",
-    buyingPrice: 155.0,
-    sellingPrice: 177.5,
-    quantity: 50000,
-    minStockLevel: 5000,
-    category: "Fuel",
-    barcode: "6191000001001",
-    supplierName: "National Oil",
-  },
-  {
-    name: "Diesel",
-    buyingPrice: 145.0,
-    sellingPrice: 162.0,
-    quantity: 60000,
-    minStockLevel: 5000,
-    category: "Fuel",
-    barcode: "6191000001002",
-    supplierName: "National Oil",
-  },
   // Food
   {
     name: "Jogoo Maize Flour 2kg",
@@ -318,10 +324,41 @@ async function seedShopData(shop, pumpOffset) {
     itemMap[item.name] = dbItem;
   }
 
+  // Create Tanks
+  const tankMap = {};
+  for (const tank of TANKS) {
+    let dbTank = await prisma.tank.findFirst({
+      where: { name: tank.name, shopId: shop.id },
+    });
+
+    const tankData = {
+      name: tank.name,
+      fuelType: tank.fuelType,
+      capacity: tank.capacity,
+      currentLevel: tank.currentLevel,
+      currentPrice: tank.currentPrice,
+      minStockLevel: tank.minStockLevel,
+      shopId: shop.id,
+    };
+
+    if (dbTank) {
+      dbTank = await prisma.tank.update({
+        where: { id: dbTank.id },
+        data: tankData,
+      });
+    } else {
+      dbTank = await prisma.tank.create({
+        data: tankData,
+      });
+    }
+    tankMap[tank.fuelType] = dbTank;
+  }
+
   // Create Pumps (pumpNumber is GLOBAL unique)
   const pumps = [
     { number: pumpOffset + 1, fuel: "Petrol", price: 177.5 },
     { number: pumpOffset + 2, fuel: "Diesel", price: 162.0 },
+    { number: pumpOffset + 3, fuel: "Kerosene", price: 110.0 },
   ];
   for (const p of pumps) {
     // Find by pump number globally first
@@ -334,7 +371,7 @@ async function seedShopData(shop, pumpOffset) {
       pumpNumber: p.number,
       fuelType: p.fuel.toLowerCase(),
       unitPrice: p.price,
-      itemId: itemMap[p.fuel].id,
+      tankId: tankMap[p.fuel.toLowerCase()].id,
       shopId: shop.id,
       lastReading: 0,
     };
