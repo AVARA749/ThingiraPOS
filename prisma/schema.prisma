@@ -26,11 +26,11 @@ model Shop {
   creditLedgers    CreditLedger[]
   creditPayments   CreditPayment[]
   generalLedgers    GeneralLedger[]
-  shiftRegisters   ShiftRegister[]
+  shiftRegisters    ShiftRegister[]
   pumps             Pump[]
   shifts            Shift[]
-  categories Category[]
-
+  categories        Category[]
+  tanks             Tank[]
 
   @@map("shops")
 }
@@ -98,8 +98,8 @@ model Item {
   shopId        String?  @map("shop_id") @db.Uuid
   shop          Shop?    @relation(fields: [shopId], references: [id], onDelete: Cascade)
 
-  supplier Supplier? @relation(fields: [supplierId], references: [id])
-  pumps    Pump[]
+  supplier       Supplier? @relation(fields: [supplierId], references: [id])
+  stockMovements StockMovement[]
 
   @@map("items")
 }
@@ -188,8 +188,6 @@ model SaleItem {
 
 model StockMovement {
   id            String   @id @default(uuid()) @db.Uuid
-  itemId        String   @map("item_id") @db.Uuid
-  itemName      String   @map("item_name")
   movementType  String   @map("movement_type")
   quantity      Decimal  @db.Decimal(12, 3)
   balanceAfter  Decimal  @default(0) @map("balance_after") @db.Decimal(12, 3)
@@ -202,6 +200,15 @@ model StockMovement {
   shop          Shop?    @relation(fields: [shopId], references: [id], onDelete: Cascade)
   userId        String?  @map("user_id") @db.Uuid
   user          User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  // Allow linking to either Item OR Tank
+  itemId        String?  @map("item_id") @db.Uuid
+  itemName      String?  @map("item_name")
+  item          Item?    @relation(fields: [itemId], references: [id])
+  
+  tankId        String?  @map("tank_id") @db.Uuid
+  tankName      String?  @map("tank_name")
+  tank          Tank?    @relation(fields: [tankId], references: [id])
 
   @@map("stock_movements")
 }
@@ -269,6 +276,32 @@ model GeneralLedger {
 
 // ============== FUEL STATION MODELS ==============
 
+model Tank {
+  id            String   @id @default(uuid()) @db.Uuid
+  name          String   // e.g. "Underground Tank 1", "Overhead Tank"
+  fuelType      FuelType @map("fuel_type") 
+  capacity      Decimal  @map("capacity") @db.Decimal(12, 3) // Max Liters
+  currentLevel  Decimal  @map("current_level") @db.Decimal(12, 3) // Current Liters
+  
+  // Fuel pricing is separate from Shop pricing
+  currentPrice  Decimal  @map("current_price") @db.Decimal(10, 2) 
+  
+  minStockLevel Decimal  @map("min_stock_level") @db.Decimal(12, 3) // Alert level
+  
+  shopId        String   @map("shop_id") @db.Uuid
+  shop          Shop     @relation(fields: [shopId], references: [id], onDelete: Cascade)
+
+  // One Tank can feed multiple Pumps
+  pumps         Pump[] 
+
+  stockMovements StockMovement[] 
+
+  createdAt     DateTime @default(now()) @map("created_at")
+  updatedAt     DateTime @default(now()) @updatedAt @map("updated_at")
+
+  @@map("tanks")
+}
+
 model Shift {
   id        String   @id @default(uuid()) @db.Uuid
   name      String   // e.g. Morning, Night
@@ -334,9 +367,9 @@ model Pump {
   fuelType  FuelType @default(petrol) @map("fuel_type")
   unitPrice Decimal  @default(0) @map("unit_price") @db.Decimal(10, 2)
   
-  // Link to Inventory for Stock Deduction
-  itemId    String?  @map("item_id") @db.Uuid
-  item      Item?    @relation(fields: [itemId], references: [id])
+  // CHANGE: Link to Tank instead of Item
+  tankId    String?  @map("tank_id") @db.Uuid
+  tank      Tank?    @relation(fields: [tankId], references: [id], onDelete: Restrict)
 
   // Totalizer Reading
   lastReading Decimal @default(0) @map("last_reading") @db.Decimal(12, 2)
