@@ -116,7 +116,7 @@ router.post("/test", express.json(), async (req, res) => {
         email,
         fullName,
         username,
-        role: "staff",
+        role: "admin",
       },
     });
 
@@ -134,7 +134,7 @@ router.post("/test", express.json(), async (req, res) => {
  * It must NOT be protected by clerkMiddleware / authenticateToken.
  *
  * Events handled:
- *   - user.created  → create a local User record for brand-new signups; link to pre-registered staff by email
+ *   - user.created  → create a local User record for brand-new signups; link to pre-registered users by email
  *   - user.updated  → keep profile details in sync
  *   - user.deleted  → unlink Clerk ID (preserves business data)
  */
@@ -184,7 +184,7 @@ router.post(
           return res.json({ received: true, skipped: "no_email" });
         }
 
-        // Find existing user by clerkUserId OR email (pre-registered staff)
+        // Find existing user by clerkUserId OR email (pre-registered users)
         const existingUser = await prisma.user.findFirst({
           where: {
             OR: [{ clerkUserId }, { email }],
@@ -193,7 +193,7 @@ router.post(
         });
 
         if (existingUser) {
-          // Existing record (pre-registered staff or returning user): link + sync
+          // Existing record (pre-registered users or returning user): link + sync
           await prisma.user.update({
             where: { id: existingUser.id },
             data: {
@@ -216,7 +216,7 @@ router.post(
               email,
               fullName: fullName || derivedUsername,
               username: derivedUsername,
-              role: "staff", // POST /api/shops will promote them to admin
+              role: "admin", // POST /api/shops will complete their setup
             },
           });
           console.log(`[Webhook] Created local user for new signup: ${email}`);

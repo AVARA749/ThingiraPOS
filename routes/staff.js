@@ -98,7 +98,7 @@ router.post("/", authenticateToken, requireAdmin, async (req, res) => {
         email: email.trim().toLowerCase(),
         fullName: fullName.trim(),
         phone: phone?.trim() || null,
-        role: "staff",
+        role: "cashier",
         shopId: shop_id,
         shopName: shop_name,
         clerkUserId: null, // Will be linked on first login
@@ -259,9 +259,13 @@ router.patch("/:id", authenticateToken, requireAdmin, async (req, res) => {
     const { shop_id } = req.user;
 
     // Validate role if provided
-    if (role && !["admin", "cashier", "fuel_station_attendant"].includes(role)) {
+    if (
+      role &&
+      !["admin", "cashier", "fuel_station_attendant"].includes(role)
+    ) {
       return res.status(400).json({
-        error: "Invalid role. Must be 'admin', 'cashier', or 'fuel_station_attendant'.",
+        error:
+          "Invalid role. Must be 'admin', 'cashier', or 'fuel_station_attendant'.",
         code: "VALIDATION_ERROR",
         field: "role",
       });

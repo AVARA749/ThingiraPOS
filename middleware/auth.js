@@ -9,8 +9,8 @@ const prisma = require("../prisma/client");
  * Flow:
  *   1. Verify Clerk session token via getAuth()
  *   2. Lookup local user by clerkUserId
- *   3. If not found by ID, try email fallback (staff pre-registered before first login)
- *   4. On first login by pre-registered staff, link their Clerk ID
+ *   3. If not found by ID, try email fallback (pre-registered users before first login)
+ *   4. On first login by pre-registered users, link their Clerk ID
  *   5. Reject if no local account or no shop is assigned
  */
 async function authenticateToken(req, res, next) {
@@ -89,7 +89,7 @@ async function authenticateToken(req, res, next) {
                 email,
                 fullName,
                 username: email.split("@")[0],
-                role: "staff",
+                role: "admin",
               },
             });
             console.log(`[Auth] Created user from Clerk: ${email}`);

@@ -18,13 +18,25 @@ router.get("/", async (req, res) => {
     if (q) {
       where.OR = [
         { name: { contains: q, mode: "insensitive" } },
-        { category: { contains: q, mode: "insensitive" } },
         { barcode: { contains: q, mode: "insensitive" } },
+        {
+          category: {
+            name: { contains: q, mode: "insensitive" },
+          },
+        },
       ];
     }
 
     if (category) {
-      where.category = category;
+      where.categoryId = category;
+    }
+
+    // Role-based isolation: POS/General users shouldn't see Fuel items
+    // Unless explicitly requested (e.g., admin setup)
+    if (req.query.pos === "true") {
+      where.category = {
+        name: { not: "Fuel" },
+      };
     }
 
     if (low_stock === "true") {
@@ -39,6 +51,9 @@ router.get("/", async (req, res) => {
         supplier: {
           select: { name: true },
         },
+        category: {
+          select: { name: true, id: true },
+        },
       },
       orderBy: { name: "asc" },
     });
@@ -51,8 +66,10 @@ router.get("/", async (req, res) => {
       items.map((i) => ({
         ...i,
         supplier_name: i.supplier?.name || null,
+        category_name: i.category?.name || "General",
         buying_price: parseFloat(i.buyingPrice),
         selling_price: parseFloat(i.sellingPrice),
+        quantity: parseFloat(i.quantity),
       })),
     );
   } catch (err) {
@@ -64,15 +81,117 @@ router.get("/", async (req, res) => {
 // GET /api/items/categories
 router.get("/categories", async (req, res) => {
   try {
-    const categories = await prisma.item.findMany({
+    const categories = await prisma.category.findMany({
       where: { shopId: req.user.shop_id },
-      select: { category: true },
-      distinct: ["category"],
-      orderBy: { category: "asc" },
+      include: {
+        _count: {
+          select: { items: true },
+        },
+      },
+      orderBy: { name: "asc" },
     });
-    res.json(categories.map((c) => c.category).filter(Boolean));
+    res.json(
+      categories.map((c) => ({
+        ...c,
+        itemCount: c._count.items,
+      })),
+    );
   } catch (err) {
     res.status(500).json({ error: "Failed to fetch categories." });
+  }
+});
+
+// POST /api/items/categories
+router.post("/categories", async (req, res) => {
+  try {
+    const { name } = req.body;
+    const shopId = req.user.shop_id;
+
+    if (!name) {
+      return res.status(400).json({ error: "Category name is required." });
+    }
+
+    const category = await prisma.category.create({
+      data: {
+        name: name.trim(),
+        shopId,
+      },
+    });
+
+    res.status(201).json(category);
+  } catch (err) {
+    if (err.code === "P2002") {
+      return res
+        .status(409)
+        .json({ error: "A category with this name already exists." });
+    }
+    res.status(500).json({ error: "Failed to create category." });
+  }
+});
+
+// PUT /api/items/categories/:id
+router.put("/categories/:id", async (req, res) => {
+  try {
+    const { name } = req.body;
+    const shopId = req.user.shop_id;
+
+    const category = await prisma.category.updateMany({
+      where: {
+        id: req.params.id,
+        shopId,
+      },
+      data: {
+        name: name.trim(),
+      },
+    });
+
+    if (category.count === 0) {
+      return res.status(404).json({ error: "Category not found." });
+    }
+
+    const updated = await prisma.category.findUnique({
+      where: { id: req.params.id },
+    });
+
+    res.json(updated);
+  } catch (err) {
+    if (err.code === "P2002") {
+      return res
+        .status(409)
+        .json({ error: "A category with this name already exists." });
+    }
+    res.status(500).json({ error: "Failed to update category." });
+  }
+});
+
+// DELETE /api/items/categories/:id
+router.delete("/categories/:id", async (req, res) => {
+  try {
+    const shopId = req.user.shop_id;
+    const categoryId = req.params.id;
+
+    // Check if category has items
+    const itemCount = await prisma.item.count({
+      where: { categoryId, shopId },
+    });
+
+    if (itemCount > 0) {
+      return res.status(400).json({
+        error: "Cannot delete category that contains items. Move the items first.",
+      });
+    }
+
+    const result = await prisma.category.deleteMany({
+      where: { id: categoryId, shopId },
+    });
+
+    if (result.count === 0) {
+      return res.status(404).json({ error: "Category not found." });
+    }
+
+    res.json({ success: true, message: "Category deleted successfully." });
+  } catch (err) {
+    res.status(500).json({ error: "Failed to delete category." });
   }
 });
 
@@ -95,8 +214,10 @@ router.get("/:id", async (req, res) => {
     res.json({
       ...item,
       supplier_name: item.supplier?.name || null,
+      category_name: item.category?.name || "General",
       buying_price: parseFloat(item.buyingPrice),
       selling_price: parseFloat(item.sellingPrice),
+      quantity: parseFloat(item.quantity),
     });
   } catch (err) {
     res.status(500).json({ error: "Failed to fetch item." });
@@ -113,7 +234,7 @@ router.post("/", async (req, res) => {
       quantity,
       min_stock_level,
       supplier_id,
-      category,
+      category_id,
       barcode,
     } = req.body;
     const shopId = req.user.shop_id;
@@ -145,7 +266,7 @@ router.post("/", async (req, res) => {
         quantity: quantity || 0,
         minStockLevel: min_stock_level || 5,
         supplierId: supplier_id || null,
-        category: category || "General",
+        categoryId: category_id || null,
         barcode: barcode || null,
       },
     });
@@ -168,8 +289,10 @@ router.post("/", async (req, res) => {
 
     res.status(201).json({
       ...item,
+      category_name: item.category?.name || "General",
       buying_price: parseFloat(item.buyingPrice),
       selling_price: parseFloat(item.sellingPrice),
+      quantity: parseFloat(item.quantity),
     });
   } catch (err) {
     console.error("Item create error:", err);
@@ -187,7 +310,7 @@ router.put("/:id", async (req, res) => {
       quantity,
       min_stock_level,
       supplier_id,
-      category,
+      category_id,
       barcode,
     } = req.body;
     const itemId = req.params.id;
@@ -213,8 +336,8 @@ router.put("/:id", async (req, res) => {
       }
     }
 
-    const currentQty = existing.quantity;
-    const newQty = quantity !== undefined ? parseInt(quantity) : currentQty;
+    const currentQty = parseFloat(existing.quantity);
+    const newQty = quantity !== undefined ? parseFloat(quantity) : currentQty;
     const qtyDiff = newQty - currentQty;
 
     const updated = await prisma.item.update({
@@ -223,11 +346,11 @@ router.put("/:id", async (req, res) => {
         name: name || undefined,
         buyingPrice: buying_price !== undefined ? buying_price : undefined,
         sellingPrice: selling_price !== undefined ? selling_price : undefined,
-        quantity: quantity !== undefined ? quantity : undefined,
+        quantity: quantity !== undefined ? parseFloat(quantity) : undefined,
         minStockLevel:
           min_stock_level !== undefined ? min_stock_level : undefined,
         supplierId: supplier_id !== undefined ? supplier_id : undefined,
-        category: category || undefined,
+        categoryId: category_id || undefined,
         barcode: barcode || undefined,
       },
     });

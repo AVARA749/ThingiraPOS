@@ -10,11 +10,11 @@ router.get("/summary", async (req, res) => {
   try {
     const { startDate, endDate } = req.query;
     const shopId = req.user.shop_id;
-    const isStaff = req.user.role === "staff";
+    const isStaff =
+      req.user.role === "cashier" || req.user.role === "fuel_station_attendant";
 
     let dateFilter = {};
     if (
-      !isStaff &&
       startDate &&
       endDate &&
       startDate !== "undefined" &&
@@ -59,9 +59,8 @@ router.get("/summary", async (req, res) => {
         else if (sale.paymentType === "sacco") acc.sacco_sales += amount;
         else if (sale.paymentType === "credit") acc.credit_sales += amount;
 
-        acc.total_items_sold += sale.saleItems.reduce(
-          (sum, si) => sum + si.quantity,
-          0,
+        acc.total_items_sold += parseFloat(
+          sale.saleItems.reduce((sum, si) => sum + parseFloat(si.quantity), 0),
         );
 
         return acc;
@@ -104,11 +103,11 @@ router.get("/hourly-sales", async (req, res) => {
   try {
     const { startDate, endDate } = req.query;
     const shopId = req.user.shop_id;
-    const isStaff = req.user.role === "staff";
+    const isStaff =
+      req.user.role === "cashier" || req.user.role === "fuel_station_attendant";
 
     let dateFilter = {};
     if (
-      !isStaff &&
       startDate &&
       endDate &&
       startDate !== "undefined" &&
@@ -169,11 +168,11 @@ router.get("/top-items", async (req, res) => {
   try {
     const { startDate, endDate } = req.query;
     const shopId = req.user.shop_id;
-    const isStaff = req.user.role === "staff";
+    const isStaff =
+      req.user.role === "cashier" || req.user.role === "fuel_station_attendant";
 
     let dateFilter = {};
     if (
-      !isStaff &&
       startDate &&
       endDate &&
       startDate !== "undefined" &&
@@ -186,7 +185,9 @@ router.get("/top-items", async (req, res) => {
     } else {
       const startOfDay = new Date();
       startOfDay.setHours(0, 0, 0, 0);
-      dateFilter = { gte: startOfDay };
+      const endOfDay = new Date();
+      endOfDay.setHours(23, 59, 59, 999);
+      dateFilter = { gte: startOfDay, lte: endOfDay };
     }
 
     const saleItems = await prisma.saleItem.findMany({
@@ -223,7 +224,8 @@ router.get("/top-items", async (req, res) => {
 router.get("/recent-transactions", async (req, res) => {
   try {
     const shopId = req.user.shop_id;
-    const isStaff = req.user.role === "staff";
+    const isStaff =
+      req.user.role === "cashier" || req.user.role === "fuel_station_attendant";
 
     const whereClause = { shopId };
 

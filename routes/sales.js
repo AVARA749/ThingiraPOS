@@ -81,13 +81,14 @@ router.post("/", async (req, res) => {
         }
 
         const unitPrice = parseFloat(si.unit_price || item.sellingPrice);
-        const subtotal = unitPrice * si.quantity;
+        const qty = parseFloat(si.quantity);
+        const subtotal = unitPrice * qty;
         totalAmount += subtotal;
 
         processedItems.push({
           itemId: item.id,
           itemName: item.name,
-          quantity: si.quantity,
+          quantity: qty,
           unitPrice: unitPrice,
           buyingPrice: parseFloat(item.buyingPrice),
           subtotal: subtotal,

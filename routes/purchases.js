@@ -143,6 +143,7 @@ router.post("/", async (req, res) => {
                 sellingPrice: pi.selling_price || undefined,
                 quantity: { increment: pi.quantity },
                 supplierId: suppId,
+                categoryId: pi.category_id || undefined,
                 minStockLevel: pi.min_stock_level || undefined,
               },
             });
@@ -157,7 +158,7 @@ router.post("/", async (req, res) => {
                 quantity: pi.quantity,
                 minStockLevel: pi.min_stock_level || 5,
                 supplierId: suppId,
-                category: pi.category || "General",
+                categoryId: pi.category_id || undefined,
               },
             });
             itemId = newItem.id;

@@ -20,24 +20,18 @@ router.get("/status", async (req, res) => {
       where: { shopId, userId, status: "open" },
       orderBy: { startTime: "desc" },
       include: {
-        nozzleShiftReadings: {
+        pumpShiftReadings: {
           include: {
-            nozzle: {
-              include: { pump: true },
-            },
+            pump: true,
           },
         },
       },
     });
 
-    // Get all nozzles with their baseline readings
+    // Get all pumps with their baseline readings
     const pumps = await prisma.pump.findMany({
       where: { shopId, isActive: true },
-      include: {
-        nozzles: {
-          where: { isActive: true },
-        },
-      },
+      orderBy: { pumpNumber: "asc" },
     });
 
     if (shift) {
@@ -48,9 +42,12 @@ router.get("/status", async (req, res) => {
     const assignedShifts = await prisma.shiftRegister.findMany({
       where: { shopId, userId, status: "assigned" },
       orderBy: { createdAt: "desc" },
+      include: {
+        shift: true,
+      },
     });
 
-    res.json({ isOpen: false, assignedShifts });
+    res.json({ isOpen: false, assignedShifts, pumps });
   } catch (err) {
     console.error("Shift status error:", err);
     res.status(500).json({ error: "Failed to check shift status." });
@@ -118,7 +115,7 @@ router.post("/assign", requireRole(["admin"]), async (req, res) => {
         shopId,
         userId,
         shiftId,
-        notes: notes || "",
+        openingNotes: notes || "", // Stored in openingNotes for consistency
         status: "assigned",
       },
       include: {
@@ -136,7 +133,7 @@ router.post("/assign", requireRole(["admin"]), async (req, res) => {
 // POST /api/shifts/open - Start an assigned shift OR open a new one
 router.post("/open", async (req, res) => {
   try {
-    const { opening_balance, notes, nozzleReadings, shiftId } = req.body;
+    const { opening_balance, notes, pumpReadings, shiftId } = req.body;
     const shopId = req.user.shop_id;
     const userId = req.user.id;
 
@@ -163,34 +160,34 @@ router.post("/open", async (req, res) => {
             status: "open",
             startTime: new Date(),
             startCash: parseFloat(opening_balance || 0),
-            notes: notes || undefined,
+            openingNotes: notes || undefined,
           },
         });
       } else {
-        // Opening an ad-hoc shift (if allowed, or just create new)
+        // Opening an ad-hoc shift
         shift = await tx.shiftRegister.create({
           data: {
             shopId,
             userId,
             startCash: parseFloat(opening_balance || 0),
-            notes: notes || "",
+            openingNotes: notes || "",
             status: "open",
             startTime: new Date(),
           },
         });
       }
 
-      // If nozzle readings provided, create them
+      // If pump readings provided, create them
       if (
-        nozzleReadings &&
-        Array.isArray(nozzleReadings) &&
-        nozzleReadings.length > 0
+        pumpReadings &&
+        Array.isArray(pumpReadings) &&
+        pumpReadings.length > 0
       ) {
-        for (const reading of nozzleReadings) {
-          await tx.nozzleShiftReading.create({
+        for (const reading of pumpReadings) {
+          await tx.pumpShiftReading.create({
             data: {
               shiftId: shift.id,
-              nozzleId: reading.nozzleId,
+              pumpId: reading.pumpId,
               openingReading: parseFloat(reading.openingReading),
               openingTime: new Date(),
             },
@@ -208,21 +205,29 @@ router.post("/open", async (req, res) => {
   }
 });
 
-// POST /api/shifts/close - Close shift with validation and petty cash
+// POST /api/shifts/close - Close shift with validation and reconciliation
 router.post("/close", async (req, res) => {
   try {
-    const { closing_balance, notes, nozzleReadings, skipMeterValidation } =
-      req.body;
+    const {
+      actual_cash, // Physical cash counted
+      total_cash_sales,
+      total_mpesa_sales,
+      total_card_sales,
+      total_credit_sales,
+      notes,
+      pumpReadings,
+      skipMeterValidation,
+    } = req.body;
+
     const shopId = req.user.shop_id;
     const userId = req.user.id;
-    const isAdmin = req.user.role === "admin";
 
     const shift = await prisma.shiftRegister.findFirst({
       where: { shopId, userId, status: "open" },
       orderBy: { startTime: "desc" },
       include: {
-        nozzleShiftReadings: {
-          include: { nozzle: true },
+        pumpShiftReadings: {
+          include: { pump: true },
         },
       },
     });
@@ -231,92 +236,47 @@ router.post("/close", async (req, res) => {
       return res.status(404).json({ error: "No open shift found." });
     }
 
-    // Validate nozzle readings if provided
-    if (
-      nozzleReadings &&
-      Array.isArray(nozzleReadings) &&
-      !skipMeterValidation
-    ) {
-      for (const reading of nozzleReadings) {
-        const existingReading = shift.nozzleShiftReadings.find(
-          (nr) => nr.nozzleId === reading.nozzleId,
+    // 1. Validate pump readings if provided
+    if (pumpReadings && Array.isArray(pumpReadings) && !skipMeterValidation) {
+      for (const reading of pumpReadings) {
+        const existingReading = shift.pumpShiftReadings.find(
+          (pr) => pr.pumpId === reading.pumpId,
         );
 
         if (
           existingReading &&
-          reading.closingReading < existingReading.openingReading
+          parseFloat(reading.closingReading) <
+            parseFloat(existingReading.openingReading)
         ) {
           return res.status(400).json({
-            error: `Meter rollback detected for nozzle ${reading.nozzleId}. Please verify reading.`,
+            error: `Meter rollback detected for pump ${reading.pumpId}. Please verify reading.`,
             code: "METER_ROLLBACK",
           });
-        }
-
-        // Check for unreasonably high volume (configurable threshold, default 5000L)
-        if (existingReading) {
-          const volumeSold =
-            reading.closingReading - existingReading.openingReading;
-          if (volumeSold > 5000) {
-            return res.status(400).json({
-              error: `This volume (${volumeSold}L) seems unusually high. Are you sure?`,
-              code: "HIGH_VOLUME_WARNING",
-              volume: volumeSold,
-            });
-          }
         }
       }
     }
 
     const result = await prisma.$transaction(async (tx) => {
-      // Calculate expected cash from sales specifically linked to this shift
-      const salesAggregation = await tx.sale.aggregate({
-        _sum: { totalAmount: true },
-        where: {
-          shiftId: shift.id,
-          status: "completed",
-        },
-      });
+      let totalMeteredRevenue = 0;
 
-      // Get payment type breakdown linked to shift
-      const cashSalesResult = await tx.sale.groupBy({
-        by: ["paymentType"],
-        _sum: { totalAmount: true },
-        where: {
-          shiftId: shift.id,
-          status: "completed",
-        },
-      });
-
-      const cashSales =
-        cashSalesResult.find((s) => s.paymentType === "cash")?._sum
-          ?.totalAmount || 0;
-      const cardSales =
-        cashSalesResult.find((s) => s.paymentType === "card")?._sum
-          ?.totalAmount || 0;
-      const mpesaSales =
-        cashSalesResult.find((s) => s.paymentType === "mpesa")?._sum
-          ?.totalAmount || 0;
-
-      const expectedCash = parseFloat(shift.startCash) + parseFloat(cashSales);
-      const variance = parseFloat(closing_balance) - expectedCash;
-
-      // Update nozzle readings with closing values
-      if (nozzleReadings && Array.isArray(nozzleReadings)) {
-        for (const reading of nozzleReadings) {
-          const existingReading = shift.nozzleShiftReadings.find(
-            (nr) => nr.nozzleId === reading.nozzleId,
+      // 2. Update pump readings and calculate metered revenue
+      if (pumpReadings && Array.isArray(pumpReadings)) {
+        for (const reading of pumpReadings) {
+          const existingReading = shift.pumpShiftReadings.find(
+            (pr) => pr.pumpId === reading.pumpId,
           );
 
           if (existingReading) {
+            const pump = await tx.pump.findUnique({
+              where: { id: reading.pumpId },
+            });
             const volumeSold =
               parseFloat(reading.closingReading) -
               parseFloat(existingReading.openingReading);
-            const nozzle = await tx.nozzle.findUnique({
-              where: { id: reading.nozzleId },
-            });
-            const amountSold = volumeSold * parseFloat(nozzle?.unitPrice || 0);
+            const amountSold = volumeSold * parseFloat(pump.unitPrice);
+            totalMeteredRevenue += amountSold;
 
-            await tx.nozzleShiftReading.update({
+            await tx.pumpShiftReading.update({
               where: { id: existingReading.id },
               data: {
                 closingReading: parseFloat(reading.closingReading),
@@ -327,23 +287,15 @@ router.post("/close", async (req, res) => {
             });
 
             // Update baseline meter for next shift
-            await tx.nozzle.update({
-              where: { id: reading.nozzleId },
+            await tx.pump.update({
+              where: { id: reading.pumpId },
               data: { lastReading: parseFloat(reading.closingReading) },
             });
 
             // INTEGRATION: Decrement Fuel Inventory
-            const fuelItem = await tx.item.findFirst({
-              where: {
-                shopId,
-                category: { equals: "Fuel", mode: "insensitive" },
-                name: { equals: nozzle.fuelType, mode: "insensitive" },
-              },
-            });
-
-            if (fuelItem) {
+            if (pump.itemId) {
               const updatedItem = await tx.item.update({
-                where: { id: fuelItem.id },
+                where: { id: pump.itemId },
                 data: { quantity: { decrement: volumeSold } },
               });
 
@@ -352,14 +304,14 @@ router.post("/close", async (req, res) => {
                 data: {
                   shopId,
                   userId,
-                  itemId: fuelItem.id,
-                  itemName: fuelItem.name,
+                  itemId: pump.itemId,
+                  itemName: updatedItem.name,
                   movementType: "OUT",
-                  quantity: volumeSold,
+                  quantity: Math.floor(volumeSold),
                   balanceAfter: updatedItem.quantity,
                   referenceType: "shift_dispense",
                   referenceId: shift.id,
-                  notes: `Dispensed via Pump - Shift ${shift.id}`,
+                  notes: `Dispensed via ${pump.name} - Shift ${shift.id}`,
                 },
               });
             }
@@ -367,19 +319,61 @@ router.post("/close", async (req, res) => {
         }
       }
 
+      // 3. Reconciliation Logic
+      const declaredTotal =
+        parseFloat(total_cash_sales || 0) +
+        parseFloat(total_mpesa_sales || 0) +
+        parseFloat(total_card_sales || 0) +
+        parseFloat(total_credit_sales || 0);
+
+      // Validation check: Metered vs Declared
+      // Note: We'll allow closing but record the discrepancy if needed.
+      // For strict validation, return error if they don't match.
+      // const tolerance = 0.01;
+      // if (Math.abs(totalMeteredRevenue - declaredTotal) > tolerance) { ... }
+
+      const expectedCashInDrawer =
+        parseFloat(shift.startCash || 0) + parseFloat(total_cash_sales || 0);
+      const variance = parseFloat(actual_cash || 0) - expectedCashInDrawer;
+
+      // Create aggregate Sales records to populate dashboards
+      const payments = [
+        { type: "cash", amount: total_cash_sales },
+        { type: "mpesa", amount: total_mpesa_sales },
+        { type: "card", amount: total_card_sales },
+        { type: "credit", amount: total_credit_sales },
+      ];
+
+      for (const p of payments) {
+        const amt = parseFloat(p.amount || 0);
+        if (amt > 0) {
+          await tx.sale.create({
+            data: {
+              shopId,
+              userId,
+              shiftId: shift.id,
+              totalAmount: amt,
+              paymentType: p.type,
+              status: "completed",
+              notes: `Aggregate ${p.type} sales for shift ${shift.id}`,
+            },
+          });
+        }
+      }
+
       return await tx.shiftRegister.update({
         where: { id: shift.id },
         data: {
           endTime: new Date(),
-          endCash: parseFloat(closing_balance),
-          expectedCash: expectedCash,
-          actualCash: parseFloat(closing_balance),
-          variance: variance,
-          totalCashSales: parseFloat(cashSales),
-          totalCardSales: parseFloat(cardSales),
-          totalMpesaSales: parseFloat(mpesaSales),
           status: "closed",
-          notes: notes || undefined,
+          closingNotes: notes || undefined,
+          expectedRevenue: totalMeteredRevenue,
+          actualCash: parseFloat(actual_cash || 0),
+          totalCashSales: parseFloat(total_cash_sales || 0),
+          totalMpesaSales: parseFloat(total_mpesa_sales || 0),
+          totalCardSales: parseFloat(total_card_sales || 0),
+          totalCreditSales: parseFloat(total_credit_sales || 0),
+          variance: variance,
         },
       });
     });
@@ -394,9 +388,12 @@ router.post("/close", async (req, res) => {
 // GET /api/shifts/history
 router.get("/history", async (req, res) => {
   try {
-    const shopId = req.user.shop_id;
+    const isStaff = req.user.role !== "admin";
     const shifts = await prisma.shiftRegister.findMany({
-      where: { shopId },
+      where: {
+        shopId,
+        ...(isStaff ? { userId: req.user.id } : {}),
+      },
       include: {
         user: { select: { fullName: true } },
         shift: true,
@@ -418,19 +415,21 @@ router.get("/history", async (req, res) => {
   }
 });
 
-// GET /api/shifts/analytics - Dashboard analytics for shift metrics
+// GET /api/shifts/analytics - Dashboard analytics for fuel metrics
 router.get("/analytics", async (req, res) => {
   try {
     const { startDate, endDate, shopId: queryShopId, fuelTypes } = req.query;
-    // Handle literal "undefined" string that might be sent by frontend hooks
     const shopId =
       queryShopId && queryShopId !== "undefined" ?
         queryShopId
       : req.user.shop_id;
 
     // Parse fuelTypes if provided (comma-separated string)
-    const fuelTypesArray = fuelTypes
-      ? (typeof fuelTypes === "string" ? fuelTypes.split(",") : fuelTypes)
+    const fuelTypesArray =
+      fuelTypes ?
+        typeof fuelTypes === "string" ?
+          fuelTypes.split(",")
+        : fuelTypes
       : [];
 
     const start =
@@ -439,33 +438,37 @@ router.get("/analytics", async (req, res) => {
       : new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
     const end = endDate ? new Date(endDate) : new Date();
 
+    const isStaff = req.user.role !== "admin";
+
     // Get shifts in date range
     const shifts = await prisma.shiftRegister.findMany({
       where: {
         shopId,
         status: "closed",
         startTime: { gte: start, lte: end },
+        ...(isStaff ? { userId: req.user.id } : {}),
       },
       include: {
         user: { select: { fullName: true } },
-        nozzleShiftReadings: {
-          include: { nozzle: true },
+        pumpShiftReadings: {
+          include: { pump: true },
         },
       },
       orderBy: { startTime: "desc" },
     });
 
     // Filter by fuel types if specified
-    const filteredShifts = fuelTypesArray.length > 0
-      ? shifts.filter((s) =>
-          s.nozzleShiftReadings.some(
+    const filteredShifts =
+      fuelTypesArray.length > 0 ?
+        shifts.filter((s) =>
+          s.pumpShiftReadings.some(
             (r) =>
-              r.nozzle && fuelTypesArray.includes(r.nozzle.fuelType.toLowerCase()),
-          )
+              r.pump && fuelTypesArray.includes(r.pump.fuelType.toLowerCase()),
+          ),
         )
       : shifts;
 
-    // Calculate totals
+    // Calculate totals from shift registers
     const totalCashSales = filteredShifts.reduce(
       (sum, s) => sum + (parseFloat(s.totalCashSales) || 0),
       0,
@@ -478,16 +481,20 @@ router.get("/analytics", async (req, res) => {
       (sum, s) => sum + (parseFloat(s.totalMpesaSales) || 0),
       0,
     );
+    const totalCreditSales = filteredShifts.reduce(
+      (sum, s) => sum + (parseFloat(s.totalCreditSales) || 0),
+      0,
+    );
     const totalVariance = filteredShifts.reduce(
       (sum, s) => sum + (parseFloat(s.variance) || 0),
       0,
     );
 
-    // Get fuel distribution from nozzle readings
+    // Get fuel distribution from pump readings
     const fuelDistribution = {};
     for (const shift of filteredShifts) {
-      for (const reading of shift.nozzleShiftReadings) {
-        const fuelType = reading.nozzle?.fuelType || "petrol";
+      for (const reading of shift.pumpShiftReadings) {
+        const fuelType = reading.pump?.fuelType || "petrol";
         if (!fuelDistribution[fuelType]) {
           fuelDistribution[fuelType] = { volume: 0, amount: 0 };
         }
@@ -506,28 +513,19 @@ router.get("/analytics", async (req, res) => {
         dailySales[date] = { petrol: 0, diesel: 0, kerosene: 0, total: 0 };
       }
 
-      for (const reading of shift.nozzleShiftReadings || []) {
-        const fuelType = reading.nozzle?.fuelType || "petrol";
+      for (const reading of shift.pumpShiftReadings || []) {
+        const fuelType = reading.pump?.fuelType || "petrol";
         const amount = parseFloat(reading.amountSold) || 0;
-        dailySales[date][fuelType] += amount;
+        if (dailySales[date][fuelType] !== undefined) {
+          dailySales[date][fuelType] += amount;
+        }
         dailySales[date].total += amount;
       }
     }
 
-    // Variance data for bar chart
-    const varianceData = filteredShifts.map((s) => ({
-      shiftId: s.id,
-      cashierName: s.user?.fullName || "Unknown",
-      date: new Date(s.startTime).toISOString().split("T")[0],
-      variance: parseFloat(s.variance) || 0,
-      status:
-        (s.variance || 0) === 0 ? "balanced"
-        : s.variance > 0 ? "surplus"
-        : "shortage",
-    }));
-
     res.json({
-      totalSales: totalCashSales + totalCardSales + totalMpesaSales,
+      totalSales:
+        totalCashSales + totalCardSales + totalMpesaSales + totalCreditSales,
       totalVolume: Object.values(fuelDistribution).reduce(
         (sum, f) => sum + f.volume,
         0,
@@ -538,7 +536,6 @@ router.get("/analytics", async (req, res) => {
         date,
         ...data,
       })),
-      varianceData,
       fuelDistribution: Object.entries(fuelDistribution).map(
         ([fuelType, data]) => ({
           fuelType,
@@ -560,22 +557,14 @@ router.get("/analytics", async (req, res) => {
   }
 });
 
-// GET /api/shifts/pumps - Get all pumps and nozzles for the shop
+// GET /api/shifts/pumps - Get all pumps for the shop
 router.get("/pumps", async (req, res) => {
   try {
     const shopId = req.user.shop_id;
-
     const pumps = await prisma.pump.findMany({
       where: { shopId, isActive: true },
-      include: {
-        nozzles: {
-          where: { isActive: true },
-          orderBy: { nozzleNumber: "asc" },
-        },
-      },
       orderBy: { pumpNumber: "asc" },
     });
-
     res.json(pumps);
   } catch (err) {
     console.error("Pumps error:", err);
@@ -586,7 +575,7 @@ router.get("/pumps", async (req, res) => {
 // POST /api/shifts/pumps - Create a new pump
 router.post("/pumps", requireAdmin, async (req, res) => {
   try {
-    const { name, pumpNumber, nozzles } = req.body;
+    const { name, pumpNumber, fuelType, unitPrice, itemId } = req.body;
     const shopId = req.user.shop_id;
 
     const pump = await prisma.pump.create({
@@ -594,31 +583,12 @@ router.post("/pumps", requireAdmin, async (req, res) => {
         shopId,
         name,
         pumpNumber: parseInt(pumpNumber),
-        nozzles: {
-          create: nozzles.map((n, idx) => ({
-            nozzleNumber: n.nozzleNumber || idx + 1,
-            fuelType: n.fuelType,
-            unitPrice: parseFloat(n.unitPrice) || 0,
-            isActive: true,
-          })),
-        },
+        fuelType,
+        unitPrice: parseFloat(unitPrice) || 0,
+        itemId: itemId || undefined,
+        isActive: true,
       },
-      include: { nozzles: true },
     });
-
-    // Sync nozzle prices with Inventory items
-    const nozzleUpdates = nozzles.map((n) =>
-      prisma.item.updateMany({
-        where: {
-          shopId: shopId,
-          category: "Fuel",
-          name: { contains: n.fuelType, mode: "insensitive" },
-        },
-        data: { sellingPrice: parseFloat(n.unitPrice) },
-      }),
-    );
-
-    await Promise.all(nozzleUpdates);
 
     res.status(201).json(pump);
   } catch (err) {
@@ -627,88 +597,34 @@ router.post("/pumps", requireAdmin, async (req, res) => {
   }
 });
 
-// PUT /api/shifts/pumps/:id - Update a pump and its nozzles
+// PUT /api/shifts/pumps/:id - Update a pump
 router.put("/pumps/:id", requireAdmin, async (req, res) => {
   try {
     const { id } = req.params;
-    const { name, pumpNumber, nozzles } = req.body;
+    const { name, pumpNumber, fuelType, unitPrice, itemId } = req.body;
     const shopId = req.user.shop_id;
 
     const result = await prisma.$transaction(async (tx) => {
-      // 1. Update Pump metadata
-      const existingPump = await tx.pump.findFirst({
-        where: { id, shopId },
-      });
-
-      if (!existingPump) {
-        throw new Error("Pump not found or unauthorized.");
-      }
-
       const pump = await tx.pump.update({
-        where: { id },
+        where: { id, shopId },
         data: {
           name,
           pumpNumber: parseInt(pumpNumber),
+          fuelType,
+          unitPrice: parseFloat(unitPrice) || 0,
+          itemId: itemId || undefined,
         },
       });
 
-      // 2. Handle nozzles
-      const nozzleIdsToKeep = nozzles.filter((n) => n.id).map((n) => n.id);
-
-      // Soft delete removed nozzles
-      await tx.nozzle.updateMany({
-        where: {
-          pumpId: id,
-          id: { notIn: nozzleIdsToKeep },
-        },
-        data: { isActive: false },
-      });
-
-      // Update or create nozzles
-      for (const n of nozzles) {
-        if (n.id) {
-          await tx.nozzle.update({
-            where: { id: n.id },
-            data: {
-              nozzleNumber: parseInt(n.nozzleNumber),
-              fuelType: n.fuelType,
-              unitPrice: parseFloat(n.unitPrice),
-              isActive: true,
-            },
-          });
-        } else {
-          await tx.nozzle.create({
-            data: {
-              pumpId: id,
-              nozzleNumber: parseInt(n.nozzleNumber),
-              fuelType: n.fuelType,
-              unitPrice: parseFloat(n.unitPrice),
-              isActive: true,
-            },
-          });
-        }
-
-        // 3. Price Synchronization Logic (Sync with Inventory)
-        const fuelItem = await tx.item.findFirst({
-          where: {
-            shopId,
-            category: { equals: "Fuel", mode: "insensitive" },
-            name: { equals: n.fuelType, mode: "insensitive" },
-          },
+      // Price Synchronization Logic (Sync with Inventory)
+      if (pump.itemId) {
+        await tx.item.update({
+          where: { id: pump.itemId },
+          data: { sellingPrice: parseFloat(unitPrice) },
         });
-
-        if (fuelItem) {
-          await tx.item.update({
-            where: { id: fuelItem.id },
-            data: { sellingPrice: parseFloat(n.unitPrice) },
-          });
-        }
       }
 
-      return await tx.pump.findUnique({
-        where: { id },
-        include: { nozzles: { where: { isActive: true } } },
-      });
+      return pump;
     });
 
     res.json(result);
@@ -724,16 +640,10 @@ router.delete("/pumps/:id", requireAdmin, async (req, res) => {
     const { id } = req.params;
     const shopId = req.user.shop_id;
 
-    await prisma.$transaction([
-      prisma.pump.updateMany({
-        where: { id, shopId },
-        data: { isActive: false },
-      }),
-      prisma.nozzle.updateMany({
-        where: { pumpId: id },
-        data: { isActive: false },
-      }),
-    ]);
+    await prisma.pump.update({
+      where: { id, shopId },
+      data: { isActive: false },
+    });
 
     res.status(204).send();
   } catch (err) {
@@ -752,8 +662,8 @@ router.get("/:id", async (req, res) => {
       where: { id, shopId },
       include: {
         user: { select: { fullName: true } },
-        nozzleShiftReadings: {
-          include: { nozzle: { include: { pump: true } } },
+        pumpShiftReadings: {
+          include: { pump: true },
         },
       },
     });
@@ -769,30 +679,25 @@ router.get("/:id", async (req, res) => {
   }
 });
 
-// POST /api/shifts/nozzles/:id/calibrate - Admin manually sets meter baseline
-router.post("/nozzles/:id/calibrate", requireAdmin, async (req, res) => {
+// POST /api/shifts/pumps/:id/calibrate - Admin manually sets meter baseline
+router.post("/pumps/:id/calibrate", requireAdmin, async (req, res) => {
   try {
     const { id } = req.params;
-    const { lastReading, notes } = req.body;
+    const { lastReading } = req.body;
     const shopId = req.user.shop_id;
 
-    const nozzle = await prisma.nozzle.updateMany({
-      where: { id, pump: { shopId } },
+    const pump = await prisma.pump.update({
+      where: { id, shopId },
       data: { lastReading: parseFloat(lastReading) },
     });
 
-    if (nozzle.count === 0) {
-      return res
-        .status(404)
-        .json({ error: "Nozzle not found or unauthorized." });
-    }
-
-    // Log the calibration in stock movement or a specific audit log if needed
-    // For now, we'll just return success
-    res.json({ message: "Nozzle calibrated successfully.", lastReading });
+    res.json({
+      message: "Pump calibrated successfully.",
+      lastReading: pump.lastReading,
+    });
   } catch (err) {
-    console.error("Calibrate nozzle error:", err);
-    res.status(500).json({ error: "Failed to calibrate nozzle." });
+    console.error("Calibrate pump error:", err);
+    res.status(500).json({ error: "Failed to calibrate pump." });
   }
 });
 
@@ -804,7 +709,7 @@ router.post("/refill", requireAdmin, async (req, res) => {
     const userId = req.user.id;
 
     const result = await prisma.$transaction(async (tx) => {
-      // 1. Find the fuel item
+      // 1. Find the fuel item by fuelType (matching Item.name)
       const fuelItem = await tx.item.findFirst({
         where: {
           shopId,
@@ -814,16 +719,15 @@ router.post("/refill", requireAdmin, async (req, res) => {
       });
 
       if (!fuelItem) {
-        throw new Error(`Fuel item for "${fuelType}" not found in inventory.`);
+        throw new Error(`Fuel item for ${fuelType} not found in inventory.`);
       }
 
-      // 2. Increment quantity
       const updatedItem = await tx.item.update({
         where: { id: fuelItem.id },
-        data: { quantity: { increment: parseFloat(volume) } },
+        data: { quantity: { increment: Math.floor(volume) } },
       });
 
-      // 3. Log Stock Movement
+      // 2. Log Stock Movement
       await tx.stockMovement.create({
         data: {
           shopId,
@@ -831,14 +735,14 @@ router.post("/refill", requireAdmin, async (req, res) => {
           itemId: fuelItem.id,
           itemName: fuelItem.name,
           movementType: "IN",
-          quantity: parseFloat(volume),
+          quantity: Math.floor(volume),
           balanceAfter: updatedItem.quantity,
           referenceType: "refill",
-          notes: notes || `Bulk Fuel Refill - ${fuelType}`,
+          notes: notes || `Refill: ${volume}L of ${fuelType}`,
         },
       });
 
-      // 4. Create an Expense or Ledger entry if cost is provided
+      // 3. Create an Expense or Ledger entry if cost is provided
       if (totalCost && parseFloat(totalCost) > 0) {
         await tx.generalLedger.create({
           data: {

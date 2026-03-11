@@ -4,7 +4,8 @@ const { authenticateToken, requireAdmin } = require("../middleware/auth");
 const router = express.Router();
 
 router.use(authenticateToken);
-router.use(requireAdmin); // Restrict all reports strictly to admins
+// We will apply requireAdmin individually to specific report routes if needed,
+// or implement scoping within the routes themselves.
 
 // GET /api/reports/daily
 router.get("/daily", async (req, res) => {
@@ -22,6 +23,7 @@ router.get("/daily", async (req, res) => {
       where: {
         shopId: shopId,
         status: "completed",
+        userId: req.user.role === "admin" ? undefined : req.user.id,
         createdAt: { gte: startOfDay, lte: endOfDay },
       },
       include: { saleItems: true },
@@ -230,7 +232,7 @@ router.get("/credit", async (req, res) => {
 });
 
 // GET /api/reports/financial - General Ledger based P&L and Balance Sheet
-router.get("/financial", async (req, res) => {
+router.get("/financial", requireAdmin, async (req, res) => {
   try {
     const shopId = req.user.shop_id;
 
@@ -302,6 +304,7 @@ router.get("/export/csv", async (req, res) => {
       const sales = await prisma.sale.findMany({
         where: {
           shopId,
+          userId: req.user.role === "admin" ? undefined : req.user.id,
           createdAt: Object.keys(dateFilter).length ? dateFilter : undefined,
         },
         orderBy: { createdAt: "desc" },
