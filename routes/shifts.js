@@ -292,23 +292,23 @@ router.post("/close", async (req, res) => {
               data: { lastReading: parseFloat(reading.closingReading) },
             });
 
-            // INTEGRATION: Decrement Fuel Inventory
-            if (pump.itemId) {
-              const updatedItem = await tx.item.update({
-                where: { id: pump.itemId },
-                data: { quantity: { decrement: volumeSold } },
+            // INTEGRATION: Decrement Fuel Inventory from Tank
+            if (pump.tankId) {
+              const updatedTank = await tx.tank.update({
+                where: { id: pump.tankId },
+                data: { currentLevel: { decrement: volumeSold } },
               });
 
-              // Log Stock Movement
+              // Log Stock Movement for Tank
               await tx.stockMovement.create({
                 data: {
                   shopId,
                   userId,
-                  itemId: pump.itemId,
-                  itemName: updatedItem.name,
+                  tankId: pump.tankId,
+                  tankName: updatedTank.name,
                   movementType: "OUT",
-                  quantity: Math.floor(volumeSold),
-                  balanceAfter: updatedItem.quantity,
+                  quantity: volumeSold,
+                  balanceAfter: updatedTank.currentLevel,
                   referenceType: "shift_dispense",
                   referenceId: shift.id,
                   notes: `Dispensed via ${pump.name} - Shift ${shift.id}`,
@@ -389,6 +389,7 @@ router.post("/close", async (req, res) => {
 router.get("/history", async (req, res) => {
   try {
     const isStaff = req.user.role !== "admin";
+    const shopId = req.user.shop_id;
     const shifts = await prisma.shiftRegister.findMany({
       where: {
         shopId,
@@ -563,6 +564,7 @@ router.get("/pumps", async (req, res) => {
     const shopId = req.user.shop_id;
     const pumps = await prisma.pump.findMany({
       where: { shopId, isActive: true },
+      include: { tank: true },
       orderBy: { pumpNumber: "asc" },
     });
     res.json(pumps);
@@ -575,7 +577,7 @@ router.get("/pumps", async (req, res) => {
 // POST /api/shifts/pumps - Create a new pump
 router.post("/pumps", requireAdmin, async (req, res) => {
   try {
-    const { name, pumpNumber, fuelType, unitPrice, itemId } = req.body;
+    const { name, pumpNumber, fuelType, unitPrice, tankId } = req.body;
     const shopId = req.user.shop_id;
 
     const pump = await prisma.pump.create({
@@ -585,7 +587,7 @@ router.post("/pumps", requireAdmin, async (req, res) => {
         pumpNumber: parseInt(pumpNumber),
         fuelType,
         unitPrice: parseFloat(unitPrice) || 0,
-        itemId: itemId || undefined,
+        tankId: tankId || undefined,
         isActive: true,
       },
     });
@@ -709,22 +711,21 @@ router.post("/refill", requireAdmin, async (req, res) => {
     const userId = req.user.id;
 
     const result = await prisma.$transaction(async (tx) => {
-      // 1. Find the fuel item by fuelType (matching Item.name)
-      const fuelItem = await tx.item.findFirst({
+      // 1. Find the fuel tank by fuelType
+      const tank = await tx.tank.findFirst({
         where: {
           shopId,
-          category: { equals: "Fuel", mode: "insensitive" },
-          name: { equals: fuelType, mode: "insensitive" },
+          fuelType: { equals: fuelType, mode: "insensitive" },
         },
       });
 
-      if (!fuelItem) {
-        throw new Error(`Fuel item for ${fuelType} not found in inventory.`);
+      if (!tank) {
+        throw new Error(`Fuel tank for ${fuelType} not found in inventory.`);
       }
 
-      const updatedItem = await tx.item.update({
-        where: { id: fuelItem.id },
-        data: { quantity: { increment: Math.floor(volume) } },
+      const updatedTank = await tx.tank.update({
+        where: { id: tank.id },
+        data: { currentLevel: { increment: volume } }, // capacity is decimal, volume can be float
       });
 
       // 2. Log Stock Movement
@@ -732,11 +733,11 @@ router.post("/refill", requireAdmin, async (req, res) => {
         data: {
           shopId,
           userId,
-          itemId: fuelItem.id,
-          itemName: fuelItem.name,
+          tankId: tank.id,
+          tankName: tank.name,
           movementType: "IN",
-          quantity: Math.floor(volume),
-          balanceAfter: updatedItem.quantity,
+          quantity: volume,
+          balanceAfter: updatedTank.currentLevel,
           referenceType: "refill",
           notes: notes || `Refill: ${volume}L of ${fuelType}`,
         },
@@ -758,7 +759,7 @@ router.post("/refill", requireAdmin, async (req, res) => {
         });
       }
 
-      return updatedItem;
+      return updatedTank;
     });
 
     res.json({

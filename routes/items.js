@@ -28,7 +28,9 @@ router.get("/", async (req, res) => {
     }
 
     if (category) {
-      where.categoryId = category;
+      where.category = {
+        name: { equals: category, mode: "insensitive" },
+      };
     }
 
     // Role-based isolation: POS/General users shouldn't see Fuel items
@@ -177,7 +179,8 @@ router.delete("/categories/:id", async (req, res) => {
 
     if (itemCount > 0) {
       return res.status(400).json({
-        error: "Cannot delete category that contains items. Move the items first.",
+        error:
+          "Cannot delete category that contains items. Move the items first.",
       });
     }
 

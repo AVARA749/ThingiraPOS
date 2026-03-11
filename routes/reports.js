@@ -86,7 +86,7 @@ router.get("/inventory", async (req, res) => {
 
     const valuation = items.reduce(
       (acc, i) => {
-        const qty = i.quantity || 0;
+        const qty = parseFloat(i.quantity || 0);
         acc.cost_value += qty * parseFloat(i.buyingPrice);
         acc.selling_value += qty * parseFloat(i.sellingPrice);
         acc.total_items += 1;
@@ -167,6 +167,12 @@ router.get("/inventory", async (req, res) => {
 router.get("/credit", async (req, res) => {
   try {
     const shopId = req.user.shop_id;
+    const { from, to } = req.query;
+
+    // Build date filter for createdAt
+    const dateFilter = {};
+    if (from) dateFilter.gte = new Date(from);
+    if (to) dateFilter.lte = new Date(to);
 
     const customers = await prisma.customer.findMany({
       where: { shopId, totalCredit: { gt: 0 } },
@@ -179,7 +185,11 @@ router.get("/credit", async (req, res) => {
     });
 
     const outstandingEntries = await prisma.creditLedger.findMany({
-      where: { shopId, status: { not: "paid" } },
+      where: { 
+        shopId, 
+        status: { not: "paid" },
+        ...(from || to ? { createdAt: dateFilter } : {}),
+      },
       include: {
         sale: {
           select: { receiptNumber: true },
@@ -197,7 +207,10 @@ router.get("/credit", async (req, res) => {
     );
 
     const payments = await prisma.creditPayment.findMany({
-      where: { shopId },
+      where: { 
+        shopId,
+        ...(from || to ? { createdAt: dateFilter } : {}),
+      },
       include: { customer: { select: { name: true } } },
       orderBy: { createdAt: "desc" },
       take: 50,
@@ -235,15 +248,28 @@ router.get("/credit", async (req, res) => {
 router.get("/financial", requireAdmin, async (req, res) => {
   try {
     const shopId = req.user.shop_id;
+    const { from, to } = req.query;
+
+    // Build date filter for createdAt
+    const dateFilter = {};
+    if (from) dateFilter.gte = new Date(from);
+    if (to) dateFilter.lte = new Date(to);
 
     // Since GeneralLedger doesn't have accountName and accountType fields in the DB schema,
     // we generate a basic summary using Sales and Purchases as a proxy for the financial report.
     const sales = await prisma.sale.aggregate({
-      where: { shopId, status: "completed" },
+      where: { 
+        shopId, 
+        status: "completed",
+        ...(from || to ? { createdAt: dateFilter } : {}),
+      },
       _sum: { totalAmount: true },
     });
     const purchases = await prisma.purchase.aggregate({
-      where: { shopId },
+      where: { 
+        shopId,
+        ...(from || to ? { createdAt: dateFilter } : {}),
+      },
       _sum: { totalCost: true },
     });
 

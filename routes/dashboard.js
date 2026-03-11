@@ -76,20 +76,27 @@ router.get("/summary", async (req, res) => {
       },
     );
 
-    let lowStock = [];
+    let lowStockItems = [];
+    let lowStockTanks = [];
     // Only admins see low stock alerts
     if (!isStaff) {
-      lowStock = await prisma.$queryRaw`
-        SELECT id, name, quantity, min_stock_level as "minStockLevel", selling_price as "sellingPrice" 
+      lowStockItems = await prisma.$queryRaw`
+        SELECT id, name, quantity, min_stock_level as "minStockLevel", selling_price as "sellingPrice", 'item' as type 
         FROM items 
         WHERE quantity <= min_stock_level AND shop_id = ${shopId} 
         ORDER BY quantity ASC
+      `;
+      lowStockTanks = await prisma.$queryRaw`
+        SELECT id, name, current_level as "quantity", min_stock_level as "minStockLevel", current_price as "sellingPrice", 'tank' as type 
+        FROM tanks 
+        WHERE current_level <= min_stock_level AND shop_id = ${shopId} 
+        ORDER BY current_level ASC
       `;
     }
 
     res.json({
       ...summary,
-      low_stock_items: lowStock,
+      low_stock_items: [...lowStockItems, ...lowStockTanks],
       date: startDate || new Date().toISOString().split("T")[0],
     });
   } catch (err) {
